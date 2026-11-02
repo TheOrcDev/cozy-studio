@@ -65,6 +65,25 @@ describe('GitHub extension source client', () => {
     expect(missing.tokenConfigured).toBe(false);
   });
 
+  it('treats an empty API URL and token as unset', async () => {
+    vi.stubEnv('STUDIO_GITHUB_API_BASE', '');
+    vi.stubEnv('COZY_STYLES_GITHUB_TOKEN', '');
+    const fetchImpl = vi.fn(async () => Response.json({ schemaVersion: 1, extensions: [entry] }));
+    try {
+      const client = createGitHubExtensionSourceClient({
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      });
+      await client.fetchIndex(source);
+      expect(fetchImpl).toHaveBeenCalledWith(
+        'https://api.github.com/repos/owner/cozy-styles-dev/contents/index.json',
+        expect.anything(),
+      );
+      expect(client.tokenConfigured).toBe(false);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('defaults to the public cozy-styles repository', () => {
     expect(resolveRemoteExtensionSources({})).toEqual([
       { id: 'gvastethecreator/cozy-styles', repo: 'gvastethecreator/cozy-styles' },

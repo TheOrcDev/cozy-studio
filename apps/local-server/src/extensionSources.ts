@@ -77,7 +77,7 @@ export interface ExtensionSourceClient {
  */
 export function createGitHubExtensionSourceClient({
   fetchImpl = fetch,
-  apiBase = process.env.STUDIO_GITHUB_API_BASE ?? 'https://api.github.com',
+  apiBase = process.env.STUDIO_GITHUB_API_BASE || 'https://api.github.com',
   token = process.env.COZY_STYLES_GITHUB_TOKEN?.trim() || undefined,
 }: {
   fetchImpl?: typeof fetch;
