@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -101,5 +109,55 @@ describe('hosted Library mirror', () => {
     expect(await b.hydratePrefix('Extensions/')).toBe(2);
     expect(existsSync(path.join(rootB, 'Extensions', 'cozy.pack-1'))).toBe(false);
     expect(existsSync(path.join(rootB, 'Extensions', 'cozy.pack-2', 'extension.json'))).toBe(true);
+  });
+
+  it('drops uploaded images past the local budget but keeps them in object storage', async () => {
+    const { objects, client } = fakeBucket();
+    const root = instanceRoot();
+    const mirror = createLibraryMirror({ root, bucket: 'test', client, localBudgetBytes: 10 });
+    const older = path.join(root, 'Library', 'older.png');
+    const newer = path.join(root, 'Library', 'newer.png');
+    const packPreview = path.join(root, 'Extensions', 'cozy.pack-1', 'preview.png');
+    const notes = path.join(root, 'Library', 'notes.json');
+
+    write(root, 'Library/older.png', 'older-0000');
+    utimesSync(older, new Date(1_000), new Date(1_000));
+    write(root, 'Library/newer.png', 'newer-0000');
+    write(root, 'Extensions/cozy.pack-1/preview.png', 'pack-preview');
+    write(root, 'Library/notes.json', '{"note":"stays"}');
+
+    expect(await mirror.sync()).toEqual({ uploaded: 4, deleted: 0 });
+    // The least recently used image goes; the newest image, style packs and non-images stay.
+    expect(existsSync(older)).toBe(false);
+    expect(existsSync(newer)).toBe(true);
+    expect(existsSync(packPreview)).toBe(true);
+    expect(existsSync(notes)).toBe(true);
+    expect(mirror.knownToExist(older)).toBe(true);
+
+    // A dropped copy is not a deletion: the next sync leaves the remote copy alone.
+    expect(await mirror.sync()).toEqual({ uploaded: 0, deleted: 0 });
+    expect(objects.has('Library/older.png')).toBe(true);
+
+    expect(await mirror.hydrate(older)).toBe(true);
+    expect(readFileSync(older, 'utf8')).toBe('older-0000');
+  });
+
+  it('uploads an edited image before dropping its local copy', async () => {
+    const { client } = fakeBucket();
+    const root = instanceRoot();
+    const mirror = createLibraryMirror({ root, bucket: 'test', client, localBudgetBytes: 0 });
+    const image = path.join(root, 'Library', 'draft.png');
+
+    write(root, 'Library/draft.png', 'first');
+    await mirror.sync();
+    expect(existsSync(image)).toBe(false);
+
+    await mirror.hydrate(image);
+    write(root, 'Library/draft.png', 'second-edit');
+    // Uploaded by this sync, so only then is it safe to drop.
+    expect((await mirror.sync()).uploaded).toBe(1);
+    expect(existsSync(image)).toBe(false);
+    expect(await mirror.hydrate(image)).toBe(true);
+    expect(readFileSync(image, 'utf8')).toBe('second-edit');
   });
 });

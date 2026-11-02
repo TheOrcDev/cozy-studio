@@ -23,12 +23,19 @@ import {
 // under HOSTED_ROOT, so paths stored in Postgres stay valid everywhere. Files are downloaded from
 // object storage when first read and uploaded after they change. Only files this instance has seen
 // can be deleted remotely: a file missing locally is merely not downloaded yet.
+// An instance's disk is small and fixed, while the bucket is not, so once local images pass a budget
+// the least recently used ones that are already uploaded are dropped and downloaded again on demand.
 
 const EXCLUDED_SEGMENTS = ['/.studio/logs/', '/logs/history/'];
 const EXCLUDED_SUFFIXES = ['.tmp', '.partial', '.sqlite', '.sqlite-wal', '.sqlite-shm'];
 const MTIME_METADATA = 'cozy-mtime-ms';
 // A copy written this recently may not be in a listing yet, so its absence proves nothing.
 const LISTING_GRACE_MS = 10_000;
+// Only images are dropped: every read of one hydrates it first. Style packs and Studio state stay.
+const EVICTABLE_SUFFIXES = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
+const PINNED_PREFIXES = ['Extensions/'];
+const PINNED_SEGMENTS = ['/.studio/'];
+const DEFAULT_LOCAL_BUDGET_BYTES = 256 * 1024 * 1024;
 
 interface MirroredFile {
   size: number;
@@ -58,10 +65,13 @@ export function createLibraryMirror({
   root,
   bucket,
   client = new S3Client({ forcePathStyle: true }),
+  localBudgetBytes = DEFAULT_LOCAL_BUDGET_BYTES,
 }: {
   root: string;
   bucket: string;
   client?: S3Client;
+  /** Local bytes of images to keep before uploaded ones are dropped. */
+  localBudgetBytes?: number;
 }): LibraryMirror {
   const synced = new Map<string, MirroredFile>();
   const knownRemote = new Set<string>();
@@ -138,6 +148,45 @@ export function createLibraryMirror({
     }
   };
 
+  const isEvictable = (key: string) => {
+    const lower = key.toLowerCase();
+    return (
+      EVICTABLE_SUFFIXES.some((suffix) => lower.endsWith(suffix)) &&
+      !PINNED_PREFIXES.some((prefix) => key.startsWith(prefix)) &&
+      !PINNED_SEGMENTS.some((segment) => `/${key}`.includes(segment))
+    );
+  };
+
+  const evictBeyondBudget = (files: string[]) => {
+    let total = 0;
+    const candidates: { filePath: string; key: string; size: number; usedAt: number }[] = [];
+    for (const filePath of files) {
+      const stat = statSync(filePath, { throwIfNoEntry: false });
+      const key = keyFor(filePath);
+      if (!stat || !key || !isEvictable(key)) continue;
+      total += stat.size;
+      const previous = synced.get(filePath);
+      // Only a copy that object storage already holds unchanged can go.
+      if (!previous || previous.size !== stat.size || previous.mtimeMs !== stat.mtimeMs) continue;
+      candidates.push({
+        filePath,
+        key,
+        size: stat.size,
+        usedAt: Math.max(stat.atimeMs, stat.mtimeMs),
+      });
+    }
+    candidates.sort((left, right) => left.usedAt - right.usedAt);
+    for (const candidate of candidates) {
+      if (total <= localBudgetBytes) return;
+      rmSync(candidate.filePath, { force: true });
+      // Forget the local copy instead of treating it as a deletion, so sync keeps the remote one.
+      synced.delete(candidate.filePath);
+      knownRemote.add(candidate.key);
+      missingRemote.delete(candidate.key);
+      total -= candidate.size;
+    }
+  };
+
   const syncOnce = async () => {
     const files: string[] = [];
     walk(root, files);
@@ -174,6 +223,7 @@ export function createLibraryMirror({
       remoteEtags.delete(key);
       deleted += 1;
     }
+    evictBeyondBudget(files.filter((filePath) => existsSync(filePath)));
     return { uploaded, deleted };
   };
 
