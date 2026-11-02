@@ -4,6 +4,8 @@ import path from 'node:path';
 import type { GenerationTaskSpec } from '../../../../packages/shared/src';
 import { resolveJobWorkspaceId } from '../../../../packages/shared/src/workspaceContracts';
 import { getDb } from './connection';
+import { isPostgresDatabase } from './postgres/sqliteCompatDatabase';
+import { migratePostgresDatabase } from './postgres/postgresSchema';
 import { ensureDefaultWorkspaceRow } from './workspaces';
 
 function now() {
@@ -829,5 +831,10 @@ export function migrateDatabase(database: Database) {
 }
 
 export function migrateDb(db?: Database) {
-  migrateDatabase(getDb(db));
+  const database = getDb(db);
+  if (isPostgresDatabase(database)) {
+    migratePostgresDatabase(database);
+    return;
+  }
+  migrateDatabase(database);
 }

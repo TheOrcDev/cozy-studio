@@ -93,6 +93,7 @@
     "iconoir-react": "^7.12.1",
     "jszip": "^3.10.2",
     "nuqs": "2.10.2",
+    "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "sharp": "0.35.5",
@@ -101,10 +102,12 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.14",
     "@tailwindcss/vite": "^4.3.4",
     "@testing-library/react": "^16.3.3",
     "@types/bun": "^1.4.4",
     "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.187.0",

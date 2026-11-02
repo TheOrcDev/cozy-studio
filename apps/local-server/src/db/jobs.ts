@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
+import { jsonTextField } from './sqlDialect';
 
 import { JOB_NOTICE_EVENT_TYPES } from '../../../../packages/shared/src/types';
 import type {
@@ -305,7 +306,7 @@ export function requeueJob(
       .query(
         `UPDATE jobs SET status = 'queued', error = NULL, updated_at = ?, completed_at = NULL,
        attempt = attempt + ?, attempt_queued_at = CASE WHEN ? = 1 THEN ? ELSE attempt_queued_at END,
-       remote_execution_json = CASE WHEN json_extract(remote_execution_json, '$.phase') IN ('failed', 'cancelled')
+       remote_execution_json = CASE WHEN ${jsonTextField(database, 'remote_execution_json', 'phase')} IN ('failed', 'cancelled')
          THEN NULL ELSE remote_execution_json END
        WHERE id = ? AND status IN ('failed', 'cancelled', 'needs_review')`,
       )

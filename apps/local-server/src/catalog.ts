@@ -4,6 +4,13 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Database } from 'bun:sqlite';
 import { getDb } from './db/connection';
+import { isPostgresDatabase } from './db/postgres/sqliteCompatDatabase';
+import {
+  equalsIgnoringCase,
+  jsonTextArrayElements,
+  likeIgnoringCase,
+  orderIgnoringCase,
+} from './db/sqlDialect';
 import { ensureDefaultLibrary, getLibrary } from './libraries';
 import { resolveLibraryPathFromRoot, toPublicAssetUrl } from './library';
 import { buildCatalogWorkspaceClause } from './catalogWorkspaceClause';
@@ -272,6 +279,7 @@ const DEFAULT_RECIPE =
   "CASE WHEN recipe_id IS NULL OR recipe_id = '' OR recipe_id = 'styles' THEN 'default' ELSE recipe_id END";
 
 function pushFilterClauses(
+  database: Database,
   filters: Omit<CatalogSmartRule, 'q' | 'recipeId'> & {
     q?: string | null;
     recipeId?: string | null;
@@ -308,12 +316,15 @@ function pushFilterClauses(
     if (search.tags.length > MAX_CATALOG_TAGS) clauses.push('0');
     for (const tag of search.tags) {
       clauses.push(
-        "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(tags) THEN tags ELSE '[]' END) AS image_tag WHERE image_tag.value = ? COLLATE NOCASE)",
+        isPostgresDatabase(database)
+          ? `EXISTS (SELECT 1 FROM ${jsonTextArrayElements(database, 'tags', 'image_tag')} WHERE ${equalsIgnoringCase(database, 'image_tag.value', '?')})`
+          : "EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(tags) THEN tags ELSE '[]' END) AS image_tag WHERE image_tag.value = ? COLLATE NOCASE)",
       );
       params.push(tag);
     }
     if (search.text) {
-      clauses.push('(prompt LIKE ? OR tags LIKE ?)');
+      const like = likeIgnoringCase(database);
+      clauses.push(`(prompt ${like} ? OR tags ${like} ?)`);
       params.push(`%${search.text}%`, `%${search.text}%`);
     }
   }
@@ -425,7 +436,7 @@ function queryCatalogInternal(
       }
       clauses.push("COALESCE(workspace_id, 'default') = ?");
       params.push(collection.workspace_id);
-      pushFilterClauses(rule, clauses, params);
+      pushFilterClauses(database, rule, clauses, params);
     } else {
       clauses.push(
         `EXISTS (
@@ -439,7 +450,7 @@ function queryCatalogInternal(
       params.push(filters.collectionId);
     }
   }
-  pushFilterClauses(filters, clauses, params);
+  pushFilterClauses(database, filters, clauses, params);
   clauses.push('is_deleted = ?');
   params.push(filters.isDeleted ? 1 : 0);
   const where = `WHERE ${clauses.join(' AND ')}`;
@@ -448,8 +459,8 @@ function queryCatalogInternal(
   const orderBy: Record<CatalogSortOption, string> = {
     desc: 'created_at DESC, id DESC',
     asc: 'created_at ASC, id ASC',
-    prompt: "COALESCE(NULLIF(prompt, ''), id) COLLATE NOCASE ASC, id ASC",
-    prompt_desc: "COALESCE(NULLIF(prompt, ''), id) COLLATE NOCASE DESC, id DESC",
+    prompt: `${orderIgnoringCase(database, "COALESCE(NULLIF(prompt, ''), id)", 'ASC')}, id ASC`,
+    prompt_desc: `${orderIgnoringCase(database, "COALESCE(NULLIF(prompt, ''), id)", 'DESC')}, id DESC`,
     ratio: "COALESCE(aspect_ratio, '1:1') ASC, id ASC",
     id: 'id ASC',
   };

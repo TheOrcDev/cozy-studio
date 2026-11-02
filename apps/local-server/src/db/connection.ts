@@ -2,6 +2,8 @@ import type { Database } from 'bun:sqlite';
 import { createRequire } from 'node:module';
 
 import { resolveLibraryPath } from '../library';
+import { createSqliteCompatPostgresDatabase } from './postgres/sqliteCompatDatabase';
+import { createSyncPostgresClient } from './postgres/syncPostgresBridge';
 
 let defaultDb: Database | null = null;
 const runtimeRequire = createRequire(import.meta.url);
@@ -9,6 +11,14 @@ const runtimeRequire = createRequire(import.meta.url);
 export function getDb(db?: Database) {
   if (db) return db;
   if (!defaultDb) {
+    // Hosted mode (ADR 0012) keeps the same synchronous store API on Postgres.
+    const postgresUrl = process.env.STUDIO_DATABASE_URL;
+    if (postgresUrl) {
+      defaultDb = createSqliteCompatPostgresDatabase(
+        createSyncPostgresClient({ kind: 'pg', connectionString: postgresUrl }),
+      );
+      return defaultDb;
+    }
     const { Database: DatabaseConstructor } = runtimeRequire(
       'bun:sqlite',
     ) as typeof import('bun:sqlite');
@@ -20,6 +30,11 @@ export function getDb(db?: Database) {
     defaultDb.run('PRAGMA foreign_keys = ON');
   }
   return defaultDb;
+}
+
+/** Installs the process-wide handle, for hosted bootstrap and tests. */
+export function setDefaultDb(db: Database | null) {
+  defaultDb = db;
 }
 
 export function closeDb(db?: Database) {

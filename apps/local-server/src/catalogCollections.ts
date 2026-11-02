@@ -17,6 +17,7 @@ import {
 import { applyCatalogTagChanges } from '../../../packages/shared/src/catalogTags';
 import { recordCatalogTagUse } from './catalogTags';
 import { getDb } from './db/connection';
+import { orderIgnoringCase } from './db/sqlDialect';
 
 function now() {
   return new Date().toISOString();
@@ -100,11 +101,12 @@ function insertMembers(
 }
 
 export function listCatalogCollections(workspaceId: string, db?: Database) {
+  const database = getDb(db);
   return (
-    getDb(db)
+    database
       .query(
         `SELECT ${COLLECTION_SELECT} FROM catalog_collections
-         WHERE workspace_id = ? ORDER BY last_used_at DESC, name COLLATE NOCASE ASC, id ASC`,
+         WHERE workspace_id = ? ORDER BY last_used_at DESC, ${orderIgnoringCase(database, 'name', 'ASC')}, id ASC`,
       )
       .all(workspaceId) as Array<Parameters<typeof mapCollection>[0]>
   ).map(mapCollection);

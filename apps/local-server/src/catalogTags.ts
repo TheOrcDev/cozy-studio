@@ -5,10 +5,19 @@ import {
   type CatalogTagPatch,
 } from '../../../packages/shared/src/catalogTags';
 import { getDb } from './db/connection';
+import { isPostgresDatabase } from './db/postgres/sqliteCompatDatabase';
+import { jsonTextArrayElements } from './db/sqlDialect';
 
 const catalogTagArraySql = `CASE WHEN json_valid(image.tags)
   THEN CASE WHEN json_type(image.tags) = 'array' THEN image.tags ELSE '[]' END
   ELSE '[]' END`;
+
+/** EXISTS over the image's tag array; SQLite keeps its original json_each spelling. */
+function imageHasTagSql(database: Database, valueSql: string) {
+  return isPostgresDatabase(database)
+    ? `EXISTS (SELECT 1 FROM ${jsonTextArrayElements(database, 'image.tags', 'image_tag')} WHERE image_tag.value = ${valueSql})`
+    : `EXISTS (SELECT 1 FROM json_each(${catalogTagArraySql}) WHERE value = ${valueSql})`;
+}
 
 export function recordCatalogTagUse(workspaceId: string, tags: string[], db?: Database) {
   const database = getDb(db);
@@ -22,10 +31,11 @@ export function recordCatalogTagUse(workspaceId: string, tags: string[], db?: Da
 }
 
 export function listCatalogTags(workspaceId: string, db?: Database): CatalogTag[] {
-  return getDb(db)
+  const database = getDb(db);
+  return database
     .query(`SELECT tag.name, tag.color, tag.last_used_at AS lastUsedAt,
     (SELECT COUNT(*) FROM catalog_images image WHERE COALESCE(image.workspace_id, 'default') = tag.workspace_id
-      AND image.is_deleted = 0 AND EXISTS (SELECT 1 FROM json_each(${catalogTagArraySql}) WHERE value = tag.name)) AS imageCount
+      AND image.is_deleted = 0 AND ${imageHasTagSql(database, 'tag.name')}) AS imageCount
     FROM catalog_tags tag WHERE workspace_id = ? ORDER BY last_used_at DESC, name ASC`)
     .all(workspaceId) as CatalogTag[];
 }
@@ -72,7 +82,7 @@ export function updateCatalogTag(
     if (nextName !== name) {
       const images = database
         .query(`SELECT image.id, image.tags FROM catalog_images image WHERE COALESCE(image.workspace_id, 'default') = ?
-        AND EXISTS (SELECT 1 FROM json_each(${catalogTagArraySql}) WHERE value = ?)`)
+        AND ${imageHasTagSql(database, '?')}`)
         .all(workspaceId, name) as { id: string; tags: string }[];
       for (const image of images) {
         let currentTags: string[];
