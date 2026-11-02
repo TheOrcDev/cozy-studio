@@ -135,6 +135,8 @@ import { createWorkflowRunReconciler } from './workflowRunReconciler';
 import { createStudioReadinessLifecycle } from './studioReadinessLifecycle';
 import { createSqliteUserStyleStore } from './sqliteUserStyles';
 import { createLocalApiSecurityMiddleware } from './localApiSecurity';
+import { withInternalRequestHeader } from './hosted/hostedSecurity';
+import type { MiddlewareHandler } from 'hono';
 import { createUiStaticHandler, resolveUiDistDir, uiDistIsReady } from './uiStaticRoutes';
 import type {
   AppServerEnsureReason,
@@ -182,11 +184,22 @@ const defaultJobStore: StudioJobStore = {
 const defaultAssetStore: StudioAssetStore = { listAssets };
 const defaultLogStore: StudioLogStore = { listLogs };
 
+/** Hosted mode (ADR 0012) replaces loopback trust with owner auth and shares state through Neon. */
+export interface HostedStudioIntegration {
+  security: MiddlewareHandler;
+  /** Registers hosted routes and returns the worker the app should use. */
+  attach(app: Hono, worker: WorkerController): WorkerController;
+  subscribeEvents: typeof subscribeEvents;
+  readEventRevision: () => number;
+  prepareLibraryFile?: (filePath: string) => Promise<void>;
+}
+
 export interface CreateStudioAppOptions {
   runInit?: boolean;
   restart?: () => void;
   /** Fetch origin/main once at startup so the UI and agents learn about updates on open. */
   checkUpdatesOnStart?: boolean;
+  hosted?: HostedStudioIntegration;
   dependencies?: {
     readLocalCodexSession?: () => Promise<LocalCodexSessionResponse>;
     readCodexModelCatalog?: () => Promise<CodexModelCatalogResponse>;
@@ -264,7 +277,7 @@ export async function createStudioApp(
     getSetting: getSettingValue,
     setSetting: setSettingValue,
   };
-  const workerController =
+  const localWorkerController =
     options.dependencies?.worker ??
     createWorkerController({
       logger: appLogger,
@@ -283,8 +296,12 @@ export async function createStudioApp(
 
   app.use(
     '*',
-    createLocalApiSecurityMiddleware({ allowedOrigins: options.dependencies?.allowedOrigins }),
+    options.hosted?.security ??
+      createLocalApiSecurityMiddleware({ allowedOrigins: options.dependencies?.allowedOrigins }),
   );
+  const workerController = options.hosted
+    ? options.hosted.attach(app, localWorkerController as WorkerController)
+    : localWorkerController;
 
   let activeMutations = 0;
   const standardBodyLimit = bodyLimit({ maxSize: LOCAL_EXTENSION_BODY_LIMIT });
@@ -678,7 +695,7 @@ export async function createStudioApp(
   app.route(
     '/api/mcp',
     createMcpRoutes({
-      request: async (path, init) => app.request(path, init),
+      request: async (path, init) => app.request(path, withInternalRequestHeader(init)),
       readSettings: () => readEditableStudioSettings(settingsStorage),
       importReference: (input) =>
         guardMutation(() => {
@@ -712,8 +729,8 @@ export async function createStudioApp(
   app.route(
     '/api',
     createEventStreamRoutes({
-      subscribeEvents,
-      readEventRevision: getCurrentEventRevision,
+      subscribeEvents: options.hosted?.subscribeEvents ?? subscribeEvents,
+      readEventRevision: options.hosted?.readEventRevision ?? getCurrentEventRevision,
     }),
   );
 
@@ -726,6 +743,7 @@ export async function createStudioApp(
       buildLibraryAssetHeaders,
       resolveAssetCacheSeconds,
       resolveThumbnailMaxEdge,
+      prepareFile: options.hosted?.prepareLibraryFile,
       logger: appLogger,
     }),
   );
@@ -738,16 +756,19 @@ export async function createStudioApp(
     app.on(['GET', 'HEAD'], '*', createUiStaticHandler({ rootDir: uiDistDir }));
   }
 
-  void readiness.refresh({ reason: 'startup' }).catch((error) => {
-    appLogger(
-      'warn',
-      'runtime',
-      `Studio Readiness startup refresh failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  });
-  // Start the first Grok and Antigravity probes now, so later requests find a report.
-  readGrokRuntimeDoctorFn();
-  readAntigravityRuntimeDoctorFn();
+  // Hosted instances have no local CLI runtimes to probe.
+  if (!options.hosted) {
+    void readiness.refresh({ reason: 'startup' }).catch((error) => {
+      appLogger(
+        'warn',
+        'runtime',
+        `Studio Readiness startup refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+    // Start the first Grok and Antigravity probes now, so later requests find a report.
+    readGrokRuntimeDoctorFn();
+    readAntigravityRuntimeDoctorFn();
+  }
 
   let shutdownPromise: Promise<void> | null = null;
 

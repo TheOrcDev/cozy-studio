@@ -16,6 +16,8 @@
   "type": "module",
   "scripts": {
     "mcp": "bun run scripts/studio-mcp.ts",
+    "hosted:admin": "bun run scripts/hosted-admin.ts",
+    "hosted:build:ui": "VITE_STUDIO_HOSTED=1 vp build",
     "dev": "bun run scripts/dev.ts",
     "dev:ui": "vp dev",
     "dev:server": "bun apps/local-server/src/index.ts",
@@ -82,15 +84,18 @@
     "portable:build": "bun run scripts/build-portable.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@chenglou/pretext": "^1.0.0",
     "@fal-ai/client": "^1.10.1",
     "@gsap/react": "^2.1.2",
     "@modelcontextprotocol/sdk": "1.32.2",
+    "@neon/functions": "^0.11.0",
     "clsx": "^2.1.1",
     "effect": "4.1.2",
     "gsap": "^3.15.0",
     "hono": "^4.13.16",
     "iconoir-react": "^7.12.1",
+    "jose": "^6.2.15",
     "jszip": "^3.10.2",
     "nuqs": "2.10.2",
     "pg": "^8.23.1",
@@ -103,6 +108,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.14",
+    "@neon/config": "^1.10.0",
     "@tailwindcss/vite": "^4.3.4",
     "@testing-library/react": "^16.3.3",
     "@types/bun": "^1.4.4",

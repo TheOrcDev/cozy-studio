@@ -8,6 +8,7 @@ import { ensureDefaultWorkspace } from './db/workspaces';
 import { ensureLibrary, resolveLibraryPath } from './library';
 import { ensureDefaultLibrary, registerOutputDirectory } from './libraries';
 import { log } from './logger';
+import { isHostedMode } from './hosted/hostedEnvironment';
 
 export function initStudio() {
   loadDotEnvLocal();
@@ -18,7 +19,8 @@ export function initStudio() {
   const envPath = path.resolve(process.cwd(), '.env.local');
   const codexVersion = null;
 
-  if (!existsSync(envPath)) {
+  // Hosted instances are configured through the function environment (ADR 0012).
+  if (!isHostedMode() && !existsSync(envPath)) {
     const settings = getSettings();
     writeFileSync(
       envPath,

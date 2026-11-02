@@ -6,12 +6,25 @@ type Listener = (event: PublishedStudioEvent) => void;
 const listeners = new Set<Listener>();
 let currentRevision = 0;
 
+/** Durable revision source; hosted mode (ADR 0012) shares one revision order across instances. */
+export interface StudioEventSink {
+  append(event: { type: string; payload: unknown; createdAt: string }): number;
+  currentRevision(): number;
+}
+
+let eventSink: StudioEventSink | null = null;
+
+export function setStudioEventSink(sink: StudioEventSink | null) {
+  eventSink = sink;
+}
+
 export function publishEvent(type: string, payload: unknown) {
+  const createdAt = new Date().toISOString();
   const event: PublishedStudioEvent = {
     type,
     payload,
-    createdAt: new Date().toISOString(),
-    revision: ++currentRevision,
+    createdAt,
+    revision: eventSink ? eventSink.append({ type, payload, createdAt }) : ++currentRevision,
   };
   for (const listener of listeners) {
     listener(event);
@@ -20,7 +33,7 @@ export function publishEvent(type: string, payload: unknown) {
 }
 
 export function getCurrentEventRevision() {
-  return currentRevision;
+  return eventSink ? eventSink.currentRevision() : currentRevision;
 }
 
 export function subscribeEvents(listener: Listener) {

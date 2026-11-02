@@ -1,0 +1,40 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "bun install --frozen-lockfile",
+  "buildCommand": "bun run hosted:build:ui",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://br-withered-hill-baw67850-studio.compute.c-8.eu-central-1.aws.neon.tech/api/:path*"
+    },
+    {
+      "source": "/library/:path*",
+      "destination": "https://br-withered-hill-baw67850-studio.compute.c-8.eu-central-1.aws.neon.tech/library/:path*"
+    },
+    {
+      "source": "/mcp",
+      "destination": "https://br-withered-hill-baw67850-studio.compute.c-8.eu-central-1.aws.neon.tech/mcp"
+    },
+    {
+      "source": "/neon-auth/:path*",
+      "destination": "https://br-withered-hill-baw67850-studio.compute.c-8.eu-central-1.aws.neon.tech/neon-auth/:path*"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "same-origin"
+        }
+      ]
+    }
+  ]
+}

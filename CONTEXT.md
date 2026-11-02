@@ -268,8 +268,24 @@ Frontend seam that creates Persistent Jobs, waits for completion, and returns ca
 _Avoid_: inline job choreography, direct editor pipeline
 
 **Studio Runtime**:
-Frontend runtime adapter that resolves how the renderer reaches the local backend.
+Frontend runtime adapter that resolves how the renderer reaches the local backend, or the hosted backend on the page origin.
 _Avoid_: readiness state, onboarding snapshot
+
+**Hosted Studio**:
+Optional way to run the same backend as a Neon Function with the UI on Vercel, for one Studio Owner (ADR 0013). Local mode stays the default.
+_Avoid_: cloud mode, SaaS, server mode
+
+**Studio Owner**:
+The one person a Hosted Studio accepts, identified by its configured email and holding an HttpOnly session.
+_Avoid_: user account, admin, tenant
+
+**Agent Token**:
+Revocable bearer secret the Studio Owner creates so agents can call hosted MCP and the API. Only its hash is stored.
+_Avoid_: API key, MCP password, Provider Secret
+
+**Hosted Storage Mirror**:
+A Hosted Studio instance's disposable copy of the Studio Data Folder and Output Folder under one fixed path, downloaded from object storage on first read and uploaded after changes.
+_Avoid_: Library, Hosted Library Mirror, cache folder, sync folder
 
 **Studio Shell**:
 Frontend seam that materializes navigation, overlays, Studio Runtime state, and Catalog Entry presentation into one renderable layout for the app shell.

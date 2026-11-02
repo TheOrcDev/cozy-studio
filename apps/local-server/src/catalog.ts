@@ -113,6 +113,13 @@ const CATALOG_WORKSPACE_AGGREGATE_COLUMNS = [
   'MAX(created_at) AS latest_created_at',
 ].join(', ');
 
+let catalogFileExists: (filePath: string) => boolean = existsSync;
+
+/** Hosted mode (ADR 0012) checks object storage instead of the instance's temporary disk. */
+export function setCatalogFileExistenceCheck(check: ((filePath: string) => boolean) | null) {
+  catalogFileExists = check ?? existsSync;
+}
+
 function mapCatalogImage(
   row: any,
   options: { includeGenerationConfig?: boolean; summary?: boolean } = {},
@@ -126,11 +133,11 @@ function mapCatalogImage(
     thumbnailPath: row.thumbnail_path,
     publicUrl: row.public_url,
     thumbnailUrl: row.thumbnail_url,
-    sourceExists: summary ? undefined : existsSync(row.file_path),
+    sourceExists: summary ? undefined : catalogFileExists(row.file_path),
     thumbnailExists: summary
       ? undefined
       : row.thumbnail_path
-        ? existsSync(row.thumbnail_path)
+        ? catalogFileExists(row.thumbnail_path)
         : false,
     prompt:
       summary && typeof row.prompt === 'string' && row.prompt.length > 240

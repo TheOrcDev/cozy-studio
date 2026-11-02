@@ -18,13 +18,22 @@ export const MIN_BUN_VERSION = '1.3.14';
 
 function getBunImage() {
   const Image = globalThis.Bun?.Image;
-  if (typeof Image !== 'function') {
+  return typeof Image === 'function' ? Image : null;
+}
+
+// Hosted mode runs on Node (ADR 0012), where Bun.Image does not exist; sharp produces the same
+// inside-fit WebP there. It is loaded lazily so the Bun hot path never imports it.
+async function loadSharp() {
+  try {
+    return (await import('sharp')).default;
+  } catch {
     throw new Error(
       `Bun.Image is required for Catalog Entry thumbnails and reference WebP conversion. Run local-server with Bun ${MIN_BUN_VERSION} or later.`,
     );
   }
-  return Image;
 }
+
+const INSIDE_FIT = { fit: 'inside', withoutEnlargement: true } as const;
 
 export async function encodeResizedWebpFromPath(
   sourcePath: string,
@@ -32,6 +41,14 @@ export async function encodeResizedWebpFromPath(
   options: ResizeWebpOptions,
 ) {
   const Image = getBunImage();
+  if (!Image) {
+    const sharp = await loadSharp();
+    await sharp(sourcePath)
+      .resize(options.maxEdge, options.maxEdge, INSIDE_FIT)
+      .webp({ quality: options.quality })
+      .toFile(destinationPath);
+    return;
+  }
   await new Image(sourcePath)
     .resize(options.maxEdge, options.maxEdge, {
       fit: 'inside',
@@ -46,6 +63,14 @@ export async function encodeResizedWebpFromBytes(
   options: ResizeWebpOptions,
 ): Promise<EncodedWebp> {
   const Image = getBunImage();
+  if (!Image) {
+    const sharp = await loadSharp();
+    const { data, info } = await sharp(bytes)
+      .resize(options.maxEdge, options.maxEdge, INSIDE_FIT)
+      .webp({ quality: options.quality })
+      .toBuffer({ resolveWithObject: true });
+    return { bytes: new Uint8Array(data), width: info.width ?? null, height: info.height ?? null };
+  }
   const image = new Image(bytes)
     .resize(options.maxEdge, options.maxEdge, {
       fit: 'inside',
@@ -62,6 +87,7 @@ export async function encodeResizedWebpFromBytes(
 
 export async function readImageMetadata(bytes: Uint8Array) {
   const Image = getBunImage();
+  if (!Image) return (await loadSharp())(bytes).metadata();
   return new Image(bytes).metadata();
 }
 

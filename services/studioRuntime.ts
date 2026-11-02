@@ -34,6 +34,8 @@ export interface StudioRuntimeSources {
   envApiBase?: string;
   pageOrigin?: string;
   productionUi?: boolean;
+  /** Hosted Cozy Studio: the UI and API share the page origin through rewrites (ADR 0012). */
+  hosted?: boolean;
   fallbackApiBase?: string;
 }
 
@@ -64,8 +66,11 @@ function resolveApiBase({
   envApiBase,
   pageOrigin,
   productionUi = false,
+  hosted = false,
   fallbackApiBase = DEFAULT_STUDIO_API_BASE,
 }: StudioRuntimeSources = {}) {
+  if (hosted && pageOrigin) return trimTrailingSlash(pageOrigin);
+
   const envBase = envApiBase?.trim();
   if (envBase) {
     return trimTrailingSlash(normalizeStudioLoopback(envBase));
@@ -83,7 +88,7 @@ export function resolveStudioRuntimeFromSources(
   sources: StudioRuntimeSources = {},
 ): StudioRuntimeInfo {
   return {
-    label: 'Web runtime',
+    label: sources.hosted ? 'Hosted runtime' : 'Web runtime',
     apiBase: resolveApiBase(sources),
     isDesktop: false,
   };
@@ -94,6 +99,7 @@ export function resolveStudioRuntime(): StudioRuntimeInfo {
     envApiBase: import.meta.env.VITE_STUDIO_API_BASE,
     pageOrigin: typeof window !== 'undefined' ? window.location.origin : undefined,
     productionUi: import.meta.env.PROD,
+    hosted: import.meta.env.VITE_STUDIO_HOSTED === '1',
   });
 }
 

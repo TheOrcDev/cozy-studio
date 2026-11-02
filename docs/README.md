@@ -7,6 +7,7 @@
 - [Troubleshooting](TROUBLESHOOTING.md): symptoms, checks and fixes
 - [Platform support](PLATFORMS.md): OS requirements and default paths
 - [Portable launch](../PORTABLE.txt): start an extracted ZIP
+- [Hosted Studio](HOSTING.md): run Studio on Neon and Vercel for one owner and their agents
 - [Security](../SECURITY.md): report a vulnerability privately and keep credentials safe
 
 ## Contribute

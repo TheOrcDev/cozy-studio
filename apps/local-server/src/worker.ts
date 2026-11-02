@@ -67,6 +67,10 @@ export interface WorkerController {
   getWorkerStatus(): WorkerStatus;
   resetWorkerState(): Promise<void>;
   shutdown(): Promise<void>;
+  /** Resolves once no job is queued or running in this process (hosted mode keeps the instance alive until then). */
+  whenIdle?(): Promise<void>;
+  /** Jobs this process has queued or is running. */
+  trackedJobIds?(): string[];
 }
 
 export interface CreateWorkerControllerDependencies {
@@ -169,6 +173,11 @@ export function createWorkerController({
     addJobEventFn(jobId, type, message, span ? { ...fields, ...span } : metadata);
   };
   const runningJobs = new Set<string>();
+  const idleWaiters: Array<() => void> = [];
+  const notifyIfIdle = () => {
+    if (runningJobs.size > 0) return;
+    for (const resolve of idleWaiters.splice(0)) resolve();
+  };
   const jobQueue: Job[] = [];
   const runningJobControllers = new Map<string, AbortController>();
   const runningJobAbortReasons = new Map<string, 'user' | 'reset' | 'shutdown'>();
@@ -596,6 +605,7 @@ export function createWorkerController({
             if (remaining === 0) activeByProvider.delete(provider);
             else activeByProvider.set(provider, remaining);
             activeJobFibers.delete(job.id);
+            notifyIfIdle();
             queueMicrotask(processQueue);
           }),
         ),
@@ -616,6 +626,7 @@ export function createWorkerController({
       if (queuedIndex >= 0) {
         const [queuedJob] = jobQueue.splice(queuedIndex, 1);
         runningJobs.delete(jobId);
+        notifyIfIdle();
         if (queuedJob?.remoteExecution) {
           const message =
             'Local observation stopped; the remote Comfy job may still be running. Resume to inspect its result.';
@@ -664,6 +675,13 @@ export function createWorkerController({
       }
 
       return untracked;
+    },
+    whenIdle() {
+      if (runningJobs.size === 0) return Promise.resolve();
+      return new Promise<void>((resolve) => idleWaiters.push(resolve));
+    },
+    trackedJobIds() {
+      return [...runningJobs];
     },
     getWorkerStatus() {
       return {
@@ -718,6 +736,7 @@ export function createWorkerController({
       }
 
       runningJobs.clear();
+      notifyIfIdle();
     },
     shutdown() {
       if (!shutdownPromise) {
@@ -746,6 +765,7 @@ export function createWorkerController({
           }
 
           runningJobs.clear();
+          notifyIfIdle();
           await runtime.dispose();
         })();
       }

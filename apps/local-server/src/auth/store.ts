@@ -65,7 +65,7 @@ const EMPTY_RECORD: Omit<StoredSubscriptionTokens, 'updatedAt'> = {
   lastError: null,
 };
 
-function emptyRecord(now: Date): StoredSubscriptionTokens {
+export function emptyRecord(now: Date): StoredSubscriptionTokens {
   return { ...EMPTY_RECORD, updatedAt: now.toISOString() };
 }
 
@@ -341,6 +341,11 @@ let defaultStore: SubscriptionAuthStore | null = null;
 export function getSubscriptionAuthStore() {
   defaultStore ??= createSubscriptionAuthStore();
   return defaultStore;
+}
+
+/** Hosted mode (ADR 0012) keeps sealed provider tokens in Postgres instead of the app-data file. */
+export function setSubscriptionAuthStore(store: SubscriptionAuthStore | null) {
+  defaultStore = store;
 }
 
 export function isSubscriptionLoggedIn(

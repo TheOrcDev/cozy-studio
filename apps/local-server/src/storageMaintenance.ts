@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import type {
@@ -15,6 +16,8 @@ import { getSettings } from './config';
 import { ensureThumbnailVariant } from './libraryAssetVariants';
 import { resolveLibraryPathFromRoot } from './library';
 import { authoringSharp } from './sharpAuthoringAdapter';
+
+const runtimeRequire = createRequire(import.meta.url);
 
 type JsonObject = Record<string, unknown>;
 
@@ -434,7 +437,8 @@ async function openStorageMaintenanceDatabase(
   dbPath: string,
   options: { readonly?: boolean } = {},
 ) {
-  const { Database } = (await import('bun:sqlite')) as {
+  // Loaded at run time like db/connection.ts, so Node bundles for hosted mode skip it.
+  const { Database } = runtimeRequire('bun:sqlite') as {
     Database: new (path: string, options?: { readonly?: boolean }) => SqliteDatabase;
   };
   return options.readonly ? new Database(dbPath, { readonly: true }) : new Database(dbPath);

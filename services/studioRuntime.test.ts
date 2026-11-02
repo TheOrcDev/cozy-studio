@@ -48,4 +48,16 @@ describe('resolveStudioRuntimeFromSources', () => {
 
     expect(runtime.apiBase).toBe('http://127.0.0.1:17223');
   });
+
+  it('uses the page origin for hosted Cozy Studio', () => {
+    const runtime = resolveStudioRuntimeFromSources({
+      hosted: true,
+      productionUi: true,
+      pageOrigin: 'https://studio.example.com/',
+      envApiBase: 'http://127.0.0.1:17223',
+    });
+
+    expect(runtime.label).toBe('Hosted runtime');
+    expect(runtime.apiBase).toBe('https://studio.example.com');
+  });
 });
