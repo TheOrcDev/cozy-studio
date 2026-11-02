@@ -76,6 +76,20 @@ claude mcp add --transport http cozy-studio https://<your-project>.vercel.app/mc
 
 Agents use the same tools as local MCP, except reading local files. Image URLs in results are signed links valid for 24 hours, so an agent can download them without the token.
 
+## Style packs from another source
+
+Settings → Styles & workflows installs packs from the public `gvastethecreator/cozy-styles` releases. To install from a different source, such as a private pack hub, add its settings to `.env.hosted` and deploy again:
+
+```bash
+STUDIO_EXTENSION_REMOTE_SOURCES=<owner/repo>
+STUDIO_GITHUB_API_BASE=<the source's GitHub-compatible API URL>
+COZY_STYLES_GITHUB_TOKEN=<the source's token or password>
+```
+
+These settings replace the public source. Packs already installed stay installed when you change or remove them, but Studio can only update a pack from the source it is set to.
+
+Each instance keeps only pack manifests on its disk. The other pack files download the first time they are read, and their images count toward the same local budget as Library images.
+
 ## Limits
 
 - Routes that act on the host (updates, onboarding, Codex app-server, output sources, library folders, maintenance, local style installs, reset) and the sprite atlas and animation workflows are not available.

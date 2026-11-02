@@ -96,6 +96,22 @@ describe('extension routes', () => {
       (await routes.request('/cozy.pack-14/files/..%2Fsecret.json?metadata=true')).status,
     ).toBe(404);
   });
+
+  it('lets the store fetch a file inside an extension before reading it', async () => {
+    await createRoutes();
+    const prepared: string[] = [];
+    const store = createExtensionStore([source], {
+      prepareFile: async (filePath) => {
+        prepared.push(path.relative(source, filePath));
+        if (filePath.endsWith('runtime.json')) await writeFile(filePath, '{"presets":[]}');
+      },
+    });
+    const routes = createExtensionRoutes({ store });
+    const runtime = await routes.request('/cozy.pack-14/files/runtime.json');
+    expect(await runtime.json()).toEqual({ presets: [] });
+    expect((await routes.request('/cozy.pack-14/files/..%2Fsecret.json')).status).toBe(404);
+    expect(prepared).toEqual([path.join('cozy.pack-14', 'runtime.json')]);
+  });
 });
 
 describe('remote extension install', () => {

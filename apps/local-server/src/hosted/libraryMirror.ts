@@ -31,11 +31,11 @@ const EXCLUDED_SUFFIXES = ['.tmp', '.partial', '.sqlite', '.sqlite-wal', '.sqlit
 const MTIME_METADATA = 'cozy-mtime-ms';
 // A copy written this recently may not be in a listing yet, so its absence proves nothing.
 const LISTING_GRACE_MS = 10_000;
-// Only images are dropped: every read of one hydrates it first. Style packs and Studio state stay.
+// Only images are dropped: every read of one hydrates it first. Studio state stays.
 const EVICTABLE_SUFFIXES = ['.png', '.jpg', '.jpeg', '.webp', '.gif'];
-const PINNED_PREFIXES = ['Extensions/'];
 const PINNED_SEGMENTS = ['/.studio/'];
 const DEFAULT_LOCAL_BUDGET_BYTES = 256 * 1024 * 1024;
+const TRANSFER_CONCURRENCY = 8;
 
 interface MirroredFile {
   size: number;
@@ -48,11 +48,15 @@ export interface LibraryMirror {
   hydrate(filePath: string): Promise<boolean>;
   hydrateAll(filePaths: Iterable<string | null | undefined>): Promise<void>;
   /**
-   * Brings a root-relative prefix up to date with object storage: downloads objects this instance
-   * lacks or that another instance replaced, and removes files another instance deleted since the
-   * last call. Returns how many local files changed.
+   * Brings the folders directly under a root-relative prefix up to date with object storage, one
+   * manifest file per folder. Downloads new or replaced manifests and the files beside the folders,
+   * creates each folder's subfolders, and removes folders another instance deleted. A folder's other
+   * files download when first read; when its manifest changes, local copies of them are dropped so
+   * the next read gets the new ones. Returns how many folders and files changed.
    */
-  hydratePrefix(prefix: string, filter?: (key: string) => boolean): Promise<number>;
+  hydrateFolders(prefix: string, manifestName: string): Promise<number>;
+  /** Deletes every remote object under a root-relative prefix, including ones never downloaded. */
+  removePrefix(prefix: string): Promise<number>;
   /** Remote size and mtime without downloading the file. */
   head(filePath: string): Promise<MirroredFile | null>;
   /** Whether the file exists locally or was seen remotely. */
@@ -98,6 +102,40 @@ export function createLibraryMirror({
     );
   };
 
+  const list = async (prefix: string, delimiter?: string) => {
+    const folders: string[] = [];
+    const files: { key: string; etag?: string }[] = [];
+    let token: string | undefined;
+    do {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Each page needs the previous page's continuation token.
+      const page = await client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          Delimiter: delimiter,
+          ContinuationToken: token,
+        }),
+      );
+      for (const folder of page.CommonPrefixes ?? [])
+        if (folder.Prefix) folders.push(folder.Prefix);
+      for (const object of page.Contents ?? []) {
+        if (object.Key) files.push({ key: object.Key, etag: object.ETag });
+      }
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+    return { folders, files };
+  };
+
+  const remoteEtag = async (key: string) => {
+    try {
+      const object = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+      return object.ETag ?? '';
+    } catch (error) {
+      if (isMissing(error)) return null;
+      throw error;
+    }
+  };
+
   const download = async (key: string, filePath: string) => {
     try {
       const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -116,8 +154,7 @@ export function createLibraryMirror({
       knownRemote.add(key);
       return true;
     } catch (error) {
-      const name = (error as { name?: string }).name;
-      if (name === 'NoSuchKey' || name === 'NotFound') {
+      if (isMissing(error)) {
         missingRemote.set(key, Date.now());
         return false;
       }
@@ -148,11 +185,65 @@ export function createLibraryMirror({
     }
   };
 
+  // The local copy is the one object storage holds: nothing in it waits to be uploaded.
+  const isStoredCopy = (filePath: string) => {
+    const local = statSync(filePath, { throwIfNoEntry: false });
+    const previous = synced.get(filePath);
+    return (
+      !!local && !!previous && previous.size === local.size && previous.mtimeMs === local.mtimeMs
+    );
+  };
+
+  // Drops stored copies under a folder; reads download them again. Returns how many went.
+  const dropStoredCopies = (directory: string) => {
+    const files: string[] = [];
+    walk(directory, files);
+    let dropped = 0;
+    for (const filePath of files) {
+      if (!isStoredCopy(filePath)) continue;
+      rmSync(filePath, { force: true });
+      synced.delete(filePath);
+      dropped += 1;
+    }
+    return dropped;
+  };
+
+  // Keeps a file beside the folders current, unless this instance changed it and has not uploaded it.
+  const refreshFile = async (key: string, etag: string | undefined) => {
+    knownRemote.add(key);
+    missingRemote.delete(key);
+    const filePath = pathFor(key);
+    const previous = remoteEtags.get(key)?.etag;
+    if (previous === undefined) rememberEtag(key, etag);
+    if (!existsSync(filePath)) return download(key, filePath);
+    const replaced = previous !== undefined && etag !== undefined && previous !== etag;
+    return replaced && isStoredCopy(filePath) && download(key, filePath);
+  };
+
+  const refreshFolder = async (folder: string, manifestName: string) => {
+    const key = `${folder}${manifestName}`;
+    const etag = await remoteEtag(key);
+    // A folder without a manifest is still uploading or was left behind.
+    if (etag === null) return { listed: false, changed: false };
+    const filePath = pathFor(key);
+    const current = existsSync(filePath);
+    // This instance installed or changed the folder and has not uploaded it yet: its copy wins.
+    if (current && !isStoredCopy(filePath)) return { listed: true, changed: false };
+    if (current && remoteEtags.get(key)?.etag === etag) return { listed: true, changed: false };
+    dropStoredCopies(pathFor(folder));
+    removeEmptyDirectories(pathFor(folder));
+    await download(key, filePath);
+    // Subfolders exist locally even before their files are read, so optional layers are detected.
+    for (const subfolder of (await list(folder, '/')).folders) {
+      mkdirSync(pathFor(subfolder), { recursive: true });
+    }
+    return { listed: true, changed: true };
+  };
+
   const isEvictable = (key: string) => {
     const lower = key.toLowerCase();
     return (
       EVICTABLE_SUFFIXES.some((suffix) => lower.endsWith(suffix)) &&
-      !PINNED_PREFIXES.some((prefix) => key.startsWith(prefix)) &&
       !PINNED_SEGMENTS.some((segment) => `/${key}`.includes(segment))
     );
   };
@@ -191,7 +282,7 @@ export function createLibraryMirror({
     const files: string[] = [];
     walk(root, files);
     const present = new Set(files);
-    let uploaded = 0;
+    const changed: { filePath: string; key: string; size: number; mtimeMs: number }[] = [];
     let deleted = 0;
     for (const filePath of files) {
       const stat = statSync(filePath, { throwIfNoEntry: false });
@@ -199,20 +290,22 @@ export function createLibraryMirror({
       if (!stat || !key) continue;
       const previous = synced.get(filePath);
       if (previous && previous.size === stat.size && previous.mtimeMs === stat.mtimeMs) continue;
+      changed.push({ filePath, key, size: stat.size, mtimeMs: stat.mtimeMs });
+    }
+    await eachLimited(changed, TRANSFER_CONCURRENCY, async ({ filePath, key, size, mtimeMs }) => {
       const put = await client.send(
         new PutObjectCommand({
           Bucket: bucket,
           Key: key,
           Body: readFileSync(filePath),
-          Metadata: { [MTIME_METADATA]: String(Math.floor(stat.mtimeMs)) },
+          Metadata: { [MTIME_METADATA]: String(Math.floor(mtimeMs)) },
         }),
       );
       rememberEtag(key, put.ETag);
-      synced.set(filePath, { size: stat.size, mtimeMs: stat.mtimeMs });
+      synced.set(filePath, { size, mtimeMs });
       knownRemote.add(key);
       missingRemote.delete(key);
-      uploaded += 1;
-    }
+    });
     for (const filePath of [...synced.keys()]) {
       if (present.has(filePath)) continue;
       const key = keyFor(filePath);
@@ -224,7 +317,7 @@ export function createLibraryMirror({
       deleted += 1;
     }
     evictBeyondBudget(files.filter((filePath) => existsSync(filePath)));
-    return { uploaded, deleted };
+    return { uploaded: changed.length, deleted };
   };
 
   return {
@@ -234,49 +327,56 @@ export function createLibraryMirror({
       const unique = [...new Set([...filePaths].filter((item): item is string => !!item))];
       await Promise.all(unique.map((filePath) => hydrate(filePath)));
     },
-    async hydratePrefix(prefix, filter = () => true) {
+    async hydrateFolders(prefix, manifestName) {
       const startedAt = Date.now();
+      const { folders, files } = await list(prefix, '/');
       const listed = new Set<string>();
-      let token: string | undefined;
       let changed = 0;
-      do {
-        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Each page needs the previous page's continuation token.
-        const page = await client.send(
-          new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
-        );
-        for (const object of page.Contents ?? []) {
-          if (!object.Key || !filter(object.Key)) continue;
-          const key = object.Key;
-          listed.add(key);
-          knownRemote.add(key);
-          missingRemote.delete(key);
-          const filePath = pathFor(key);
-          const previous = remoteEtags.get(key)?.etag;
-          if (previous === undefined) rememberEtag(key, object.ETag);
-          const replaced =
-            previous !== undefined && object.ETag !== undefined && previous !== object.ETag;
-          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Downloads stay sequential to bound memory.
-          if ((!existsSync(filePath) || replaced) && (await download(key, filePath))) changed += 1;
-        }
-        token = page.IsTruncated ? page.NextContinuationToken : undefined;
-      } while (token);
+      for (const { key, etag } of files) {
+        listed.add(key);
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Files beside the folders are a few small markers.
+        if (await refreshFile(key, etag)) changed += 1;
+      }
+      const refreshed = await Promise.all(
+        folders.map(async (folder) => ({
+          key: `${folder}${manifestName}`,
+          ...(await refreshFolder(folder, manifestName)),
+        })),
+      );
+      for (const folder of refreshed) {
+        if (folder.listed) listed.add(folder.key);
+        if (folder.changed) changed += 1;
+      }
       for (const [key, { seenAt }] of [...remoteEtags]) {
-        if (!key.startsWith(prefix) || listed.has(key) || !filter(key)) continue;
+        if (!key.startsWith(prefix) || listed.has(key)) continue;
         if (seenAt > startedAt - LISTING_GRACE_MS) continue;
+        const [name, rest] = key.slice(prefix.length).split('/', 2);
+        if (rest !== undefined && rest !== manifestName) continue;
         remoteEtags.delete(key);
         knownRemote.delete(key);
-        const filePath = pathFor(key);
-        const local = statSync(filePath, { throwIfNoEntry: false });
-        const previous = synced.get(filePath);
-        // A file changed here and not uploaded yet stays; the next sync uploads it again.
-        if (!local || !previous || previous.size !== local.size) continue;
-        if (previous.mtimeMs !== local.mtimeMs) continue;
-        rmSync(filePath, { force: true });
-        synced.delete(filePath);
-        removeEmptyParents(path.dirname(filePath), pathFor(prefix));
-        changed += 1;
+        // A removed folder goes with every stored copy in it; a changed, unuploaded file stays.
+        const target = pathFor(rest === undefined ? key : `${prefix}${name}`);
+        if (rest === undefined) {
+          if (!isStoredCopy(target)) continue;
+          rmSync(target, { force: true });
+          synced.delete(target);
+          changed += 1;
+        } else {
+          changed += dropStoredCopies(target);
+          removeEmptyDirectories(target);
+        }
       }
       return changed;
+    },
+    async removePrefix(prefix) {
+      const { files } = await list(prefix);
+      await eachLimited(files, TRANSFER_CONCURRENCY, async ({ key }) => {
+        await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+        remoteEtags.delete(key);
+        knownRemote.delete(key);
+        synced.delete(pathFor(key));
+      });
+      return files.length;
     },
     async head(filePath) {
       const key = keyFor(filePath);
@@ -322,19 +422,38 @@ export function createLibraryMirror({
   };
 }
 
-function removeEmptyParents(directory: string, stopAt: string) {
-  for (
-    let current = directory;
-    current.startsWith(`${stopAt}${path.sep}`);
-    current = path.dirname(current)
-  ) {
-    try {
-      if (readdirSync(current).length > 0) return;
-      rmSync(current, { recursive: true, force: true });
-    } catch {
-      return;
-    }
+function isMissing(error: unknown) {
+  const name = (error as { name?: string }).name;
+  return name === 'NoSuchKey' || name === 'NotFound';
+}
+
+/** Removes the directory if nothing but empty directories is left in it. */
+function removeEmptyDirectories(directory: string): boolean {
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return false;
   }
+  const empty = entries.every(
+    (entry) => entry.isDirectory() && removeEmptyDirectories(path.join(directory, entry.name)),
+  );
+  if (empty) rmSync(directory, { recursive: true, force: true });
+  return empty;
+}
+
+/** Runs `run` over every item with at most `limit` in flight. */
+async function eachLimited<T>(items: T[], limit: number, run: (item: T) => Promise<void>) {
+  let next = 0;
+  const lane = async () => {
+    while (next < items.length) {
+      const item = items[next] as T;
+      next += 1;
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Each lane runs one transfer at a time.
+      await run(item);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
 }
 
 /** Removes leftovers of an earlier instance so nothing stale is uploaded as new. */

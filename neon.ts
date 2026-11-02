@@ -8,6 +8,10 @@ const required = (name: string) => {
   if (!value) throw new Error(`Set ${name} in .env.hosted before deploying.`);
   return value;
 };
+const optional = (...names: string[]) =>
+  Object.fromEntries(
+    names.flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : [])),
+  );
 
 export default defineConfig({
   functions: {
@@ -23,6 +27,12 @@ export default defineConfig({
         STUDIO_SECRET_KEY: required('STUDIO_SECRET_KEY'),
         STUDIO_SWEEP_SECRET: required('STUDIO_SWEEP_SECRET'),
         STUDIO_LIBRARY_BUCKET: 'studio-library',
+        // Where Settings installs style packs from (docs/HOSTING.md). Unset means the public packs.
+        ...optional(
+          'STUDIO_EXTENSION_REMOTE_SOURCES',
+          'STUDIO_GITHUB_API_BASE',
+          'COZY_STYLES_GITHUB_TOKEN',
+        ),
       },
     },
   },

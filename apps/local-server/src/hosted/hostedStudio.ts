@@ -1,9 +1,11 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { timingSafeEqual } from 'node:crypto';
 import { waitUntil } from '@neon/functions';
 import type { Hono } from 'hono';
 
 import type { Job } from '../../../../packages/shared/src';
+import { EXTENSION_MANIFEST_FILE } from '../../../../packages/shared/src/extensions';
 import { createStudioApp, type StudioAppInstance } from '../appFactory';
 import { setSubscriptionAuthStore } from '../auth/store';
 import { setCatalogFileExistenceCheck } from '../catalog';
@@ -26,8 +28,7 @@ import { createLibraryMirror, resetHostedRoot, thumbnailCacheKey } from './libra
 import { createNeonAuthProxyRoutes } from './neonAuthProxy';
 import { createSealedSubscriptionAuthStore } from './sealedCredentialStore';
 
-// Style pack files other than full-size cards, which download when first requested.
-const isExtensionIndexKey = (key: string) => !key.includes('/cards/');
+const EXTENSIONS_PREFIX = 'Extensions/';
 const EXTENSION_REFRESH_MS = 15_000;
 
 function jobFilePaths(job: Job) {
@@ -82,9 +83,16 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
 
   const mirror = createLibraryMirror({ root: HOSTED_ROOT, bucket });
   setCatalogFileExistenceCheck((filePath) => mirror.knownToExist(filePath));
-  // Extension listings scan manifests on disk; full-size card layers download on demand.
-  await mirror.hydratePrefix('Extensions/', isExtensionIndexKey);
-  const extensionStore = createExtensionStore(resolveExtensionSources());
+  const syncLibrary = () => background(mirror.sync(), 'Library upload');
+  // Extension listings scan manifests on disk. Every other style pack file downloads when first
+  // read, and a sync afterwards keeps downloaded images within the local budget.
+  await mirror.hydrateFolders(EXTENSIONS_PREFIX, EXTENSION_MANIFEST_FILE);
+  const extensionStore = createExtensionStore(resolveExtensionSources(), {
+    prepareFile: async (filePath) => {
+      if (existsSync(filePath)) return;
+      if (await mirror.hydrate(filePath)) syncLibrary();
+    },
+  });
   // Style packs another instance installed, updated or removed appear on this one's next listing.
   let extensionsCheckedAt = Date.now();
   let extensionsRefresh: Promise<void> = Promise.resolve();
@@ -92,7 +100,7 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
     if (Date.now() - extensionsCheckedAt < EXTENSION_REFRESH_MS) return extensionsRefresh;
     extensionsCheckedAt = Date.now();
     extensionsRefresh = mirror
-      .hydratePrefix('Extensions/', isExtensionIndexKey)
+      .hydrateFolders(EXTENSIONS_PREFIX, EXTENSION_MANIFEST_FILE)
       .then(async (changed) => {
         if (changed > 0) await extensionStore.list({ refresh: true });
       })
@@ -106,7 +114,6 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
     return extensionsRefresh;
   };
 
-  const syncLibrary = () => background(mirror.sync(), 'Library upload');
   let sweep: (() => { adopted: number }) | null = null;
 
   const attach = (app: Hono, worker: Parameters<typeof createHostedJobRuntime>[0]['worker']) => {
@@ -160,22 +167,18 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
       await refreshExtensions();
       await next();
     });
-    app.get('/api/extensions/:id/files/*', async (c, next) => {
+    // Files of a removed pack that this instance never downloaded go from storage too.
+    app.delete('/api/extensions/:id', async (c, next) => {
       const id = c.req.param('id');
       const extension = (await extensionStore.list()).extensions.find(
         (item) => item.manifest.id === id,
       );
-      let relative: string | null = null;
-      try {
-        relative = decodeURIComponent(c.req.path.split(`/${id}/files/`)[1] ?? '');
-      } catch {
-        relative = null;
-      }
-      if (extension && relative) {
-        const filePath = path.resolve(extension.root, relative);
-        if (filePath.startsWith(`${extension.root}${path.sep}`)) await mirror.hydrate(filePath);
-      }
       await next();
+      if (c.res.status !== 204 || !extension) return;
+      const folder = path.relative(HOSTED_ROOT, extension.root).split(path.sep).join('/');
+      if (folder.startsWith(EXTENSIONS_PREFIX)) {
+        background(mirror.removePrefix(`${folder}/`), 'Style pack removal');
+      }
     });
 
     app.post('/internal/sweep/:secret', (c) => {

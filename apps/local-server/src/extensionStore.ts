@@ -66,7 +66,15 @@ function insideRoot(root: string, relativePath: string) {
   return resolved.startsWith(`${path.resolve(root)}${path.sep}`) ? resolved : null;
 }
 
-export function createExtensionStore(sources: string[]): ExtensionStore {
+export function createExtensionStore(
+  sources: string[],
+  {
+    prepareFile,
+  }: {
+    /** Runs before a file is read, so hosted Studio can download it first. */
+    prepareFile?: (filePath: string) => Promise<unknown>;
+  } = {},
+): ExtensionStore {
   async function scan(): Promise<ExtensionListing> {
     const extensions: InstalledExtension[] = [];
     const invalid: ExtensionListing['invalid'] = [];
@@ -132,7 +140,9 @@ export function createExtensionStore(sources: string[]): ExtensionStore {
       const extension = (await list()).extensions.find((item) => item.manifest.id === extensionId);
       if (!extension) return null;
       const filePath = insideRoot(extension.root, relativePath);
-      if (!filePath || !existsSync(filePath) || !(await stat(filePath)).isFile()) return null;
+      if (!filePath) return null;
+      await prepareFile?.(filePath);
+      if (!existsSync(filePath) || !(await stat(filePath)).isFile()) return null;
       return readFile(filePath);
     },
   };
