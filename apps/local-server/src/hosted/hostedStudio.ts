@@ -12,6 +12,7 @@ import { getDb } from '../db/connection';
 import { listRecoverableJobs } from '../db/jobs';
 import { migrateDb } from '../db/migrations';
 import { setStudioEventSink } from '../events';
+import { createExtensionStore, resolveExtensionSources } from '../extensionStore';
 import { resolvePublicLibraryAssetRequest } from '../libraries';
 import { resolveLibraryPathFromRoot, resolvePublicLibraryPath } from '../library';
 import { buildLibraryAssetHeaders, resolveThumbnailMaxEdge } from '../libraryAssetVariants';
@@ -24,6 +25,10 @@ import { createHostedSecurityMiddleware, createOwnerSessionRoutes } from './host
 import { createLibraryMirror, resetHostedRoot, thumbnailCacheKey } from './libraryMirror';
 import { createNeonAuthProxyRoutes } from './neonAuthProxy';
 import { createSealedSubscriptionAuthStore } from './sealedCredentialStore';
+
+// Style pack files other than full-size cards, which download when first requested.
+const isExtensionIndexKey = (key: string) => !key.includes('/cards/');
+const EXTENSION_REFRESH_MS = 15_000;
 
 function jobFilePaths(job: Job) {
   return [
@@ -78,7 +83,28 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
   const mirror = createLibraryMirror({ root: HOSTED_ROOT, bucket });
   setCatalogFileExistenceCheck((filePath) => mirror.knownToExist(filePath));
   // Extension listings scan manifests on disk; full-size card layers download on demand.
-  await mirror.hydratePrefix('Extensions/', (key) => !key.includes('/cards/'));
+  await mirror.hydratePrefix('Extensions/', isExtensionIndexKey);
+  const extensionStore = createExtensionStore(resolveExtensionSources());
+  // Style packs another instance installed, updated or removed appear on this one's next listing.
+  let extensionsCheckedAt = Date.now();
+  let extensionsRefresh: Promise<void> = Promise.resolve();
+  const refreshExtensions = () => {
+    if (Date.now() - extensionsCheckedAt < EXTENSION_REFRESH_MS) return extensionsRefresh;
+    extensionsCheckedAt = Date.now();
+    extensionsRefresh = mirror
+      .hydratePrefix('Extensions/', isExtensionIndexKey)
+      .then(async (changed) => {
+        if (changed > 0) await extensionStore.list({ refresh: true });
+      })
+      .catch((error) =>
+        log(
+          'warn',
+          'hosted',
+          `Style pack refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    return extensionsRefresh;
+  };
 
   const syncLibrary = () => background(mirror.sync(), 'Library upload');
   let sweep: (() => { adopted: number }) | null = null;
@@ -130,6 +156,28 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
       });
     });
 
+    app.get('/api/extensions', async (_c, next) => {
+      await refreshExtensions();
+      await next();
+    });
+    app.get('/api/extensions/:id/files/*', async (c, next) => {
+      const id = c.req.param('id');
+      const extension = (await extensionStore.list()).extensions.find(
+        (item) => item.manifest.id === id,
+      );
+      let relative: string | null = null;
+      try {
+        relative = decodeURIComponent(c.req.path.split(`/${id}/files/`)[1] ?? '');
+      } catch {
+        relative = null;
+      }
+      if (extension && relative) {
+        const filePath = path.resolve(extension.root, relative);
+        if (filePath.startsWith(`${extension.root}${path.sep}`)) await mirror.hydrate(filePath);
+      }
+      await next();
+    });
+
     app.post('/internal/sweep/:secret', (c) => {
       if (!sameSecret(c.req.param('secret'), sweepSecret)) return c.json({ ok: false }, 404);
       const result = sweep?.() ?? { adopted: 0 };
@@ -169,6 +217,7 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
   };
 
   const studio = await createStudioApp({
+    dependencies: { extensionStore },
     hosted: {
       security: createHostedSecurityMiddleware({
         database,

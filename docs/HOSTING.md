@@ -80,5 +80,6 @@ Agents use the same tools as local MCP, except reading local files. Image URLs i
 
 - Routes that act on the host (updates, onboarding, Codex app-server, output sources, library folders, maintenance, local style installs, reset) and the sprite atlas and animation workflows are not available.
 - The first time an instance reads an image, it downloads it from object storage.
+- A style pack installed or removed on one instance reaches the others the next time they list style packs. Reload Studio to see it.
 - If an instance stops mid-job, the sweeper (every 15 minutes) adopts the job. A ChatGPT job that had already been submitted moves to review instead of being sent twice.
 - ChatGPT sign-in endpoints are not a documented API, and hosted requests come from Neon's network.

@@ -27,6 +27,8 @@ import {
 const EXCLUDED_SEGMENTS = ['/.studio/logs/', '/logs/history/'];
 const EXCLUDED_SUFFIXES = ['.tmp', '.partial', '.sqlite', '.sqlite-wal', '.sqlite-shm'];
 const MTIME_METADATA = 'cozy-mtime-ms';
+// A copy written this recently may not be in a listing yet, so its absence proves nothing.
+const LISTING_GRACE_MS = 10_000;
 
 interface MirroredFile {
   size: number;
@@ -38,7 +40,11 @@ export interface LibraryMirror {
   /** Downloads the file if this instance does not have it yet. Returns whether it exists now. */
   hydrate(filePath: string): Promise<boolean>;
   hydrateAll(filePaths: Iterable<string | null | undefined>): Promise<void>;
-  /** Downloads every object under a root-relative prefix whose key passes the filter. */
+  /**
+   * Brings a root-relative prefix up to date with object storage: downloads objects this instance
+   * lacks or that another instance replaced, and removes files another instance deleted since the
+   * last call. Returns how many local files changed.
+   */
   hydratePrefix(prefix: string, filter?: (key: string) => boolean): Promise<number>;
   /** Remote size and mtime without downloading the file. */
   head(filePath: string): Promise<MirroredFile | null>;
@@ -60,6 +66,11 @@ export function createLibraryMirror({
   const synced = new Map<string, MirroredFile>();
   const knownRemote = new Set<string>();
   const missingRemote = new Map<string, number>();
+  // The remote copies this instance last downloaded, uploaded or listed, and when.
+  const remoteEtags = new Map<string, { etag: string; seenAt: number }>();
+  const rememberEtag = (key: string, etag: string | undefined) => {
+    if (etag) remoteEtags.set(key, { etag, seenAt: Date.now() });
+  };
   let syncing: Promise<{ uploaded: number; deleted: number }> | null = null;
   let syncAgain = false;
 
@@ -82,6 +93,7 @@ export function createLibraryMirror({
       const object = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
       const bytes = await object.Body?.transformToByteArray();
       if (!bytes) return false;
+      rememberEtag(key, object.ETag);
       mkdirSync(path.dirname(filePath), { recursive: true });
       writeFileSync(filePath, bytes);
       // Thumbnail cache keys include the source mtime, so keep it stable across instances.
@@ -138,7 +150,7 @@ export function createLibraryMirror({
       if (!stat || !key) continue;
       const previous = synced.get(filePath);
       if (previous && previous.size === stat.size && previous.mtimeMs === stat.mtimeMs) continue;
-      await client.send(
+      const put = await client.send(
         new PutObjectCommand({
           Bucket: bucket,
           Key: key,
@@ -146,6 +158,7 @@ export function createLibraryMirror({
           Metadata: { [MTIME_METADATA]: String(Math.floor(stat.mtimeMs)) },
         }),
       );
+      rememberEtag(key, put.ETag);
       synced.set(filePath, { size: stat.size, mtimeMs: stat.mtimeMs });
       knownRemote.add(key);
       missingRemote.delete(key);
@@ -158,6 +171,7 @@ export function createLibraryMirror({
       if (!key) continue;
       await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
       knownRemote.delete(key);
+      remoteEtags.delete(key);
       deleted += 1;
     }
     return { uploaded, deleted };
@@ -171,21 +185,48 @@ export function createLibraryMirror({
       await Promise.all(unique.map((filePath) => hydrate(filePath)));
     },
     async hydratePrefix(prefix, filter = () => true) {
+      const startedAt = Date.now();
+      const listed = new Set<string>();
       let token: string | undefined;
-      let count = 0;
+      let changed = 0;
       do {
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Each page needs the previous page's continuation token.
         const page = await client.send(
           new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }),
         );
         for (const object of page.Contents ?? []) {
           if (!object.Key || !filter(object.Key)) continue;
-          knownRemote.add(object.Key);
-          const filePath = pathFor(object.Key);
-          if (!existsSync(filePath) && (await download(object.Key, filePath))) count += 1;
+          const key = object.Key;
+          listed.add(key);
+          knownRemote.add(key);
+          missingRemote.delete(key);
+          const filePath = pathFor(key);
+          const previous = remoteEtags.get(key)?.etag;
+          if (previous === undefined) rememberEtag(key, object.ETag);
+          const replaced =
+            previous !== undefined && object.ETag !== undefined && previous !== object.ETag;
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Downloads stay sequential to bound memory.
+          if ((!existsSync(filePath) || replaced) && (await download(key, filePath))) changed += 1;
         }
         token = page.IsTruncated ? page.NextContinuationToken : undefined;
       } while (token);
-      return count;
+      for (const [key, { seenAt }] of [...remoteEtags]) {
+        if (!key.startsWith(prefix) || listed.has(key) || !filter(key)) continue;
+        if (seenAt > startedAt - LISTING_GRACE_MS) continue;
+        remoteEtags.delete(key);
+        knownRemote.delete(key);
+        const filePath = pathFor(key);
+        const local = statSync(filePath, { throwIfNoEntry: false });
+        const previous = synced.get(filePath);
+        // A file changed here and not uploaded yet stays; the next sync uploads it again.
+        if (!local || !previous || previous.size !== local.size) continue;
+        if (previous.mtimeMs !== local.mtimeMs) continue;
+        rmSync(filePath, { force: true });
+        synced.delete(filePath);
+        removeEmptyParents(path.dirname(filePath), pathFor(prefix));
+        changed += 1;
+      }
+      return changed;
     },
     async head(filePath) {
       const key = keyFor(filePath);
@@ -229,6 +270,21 @@ export function createLibraryMirror({
       return syncing;
     },
   };
+}
+
+function removeEmptyParents(directory: string, stopAt: string) {
+  for (
+    let current = directory;
+    current.startsWith(`${stopAt}${path.sep}`);
+    current = path.dirname(current)
+  ) {
+    try {
+      if (readdirSync(current).length > 0) return;
+      rmSync(current, { recursive: true, force: true });
+    } catch {
+      return;
+    }
+  }
 }
 
 /** Removes leftovers of an earlier instance so nothing stale is uploaded as new. */
