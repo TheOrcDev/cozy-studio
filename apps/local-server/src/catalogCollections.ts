@@ -17,7 +17,7 @@ import {
 import { applyCatalogTagChanges } from '../../../packages/shared/src/catalogTags';
 import { recordCatalogTagUse } from './catalogTags';
 import { getDb } from './db/connection';
-import { orderIgnoringCase } from './db/sqlDialect';
+import { equalsIgnoringCase, orderIgnoringCase } from './db/sqlDialect';
 
 function now() {
   return new Date().toISOString();
@@ -222,13 +222,13 @@ export function addImageToNamedCollection(
   database
     .query(
       `INSERT OR IGNORE INTO catalog_collection_images (collection_id, image_id, added_at)
-       SELECT id, ?, ? FROM catalog_collections WHERE workspace_id = ? AND name = ? COLLATE NOCASE AND rule_json IS NULL`,
+       SELECT id, ?, ? FROM catalog_collections WHERE workspace_id = ? AND ${equalsIgnoringCase(database, 'name', '?')} AND rule_json IS NULL`,
     )
     .run(imageId, timestamp, workspaceId, name);
   database
     .query(
       `UPDATE catalog_collections SET last_used_at = ?, updated_at = ?
-       WHERE workspace_id = ? AND name = ? COLLATE NOCASE AND rule_json IS NULL`,
+       WHERE workspace_id = ? AND ${equalsIgnoringCase(database, 'name', '?')} AND rule_json IS NULL`,
     )
     .run(timestamp, timestamp, workspaceId, name);
 }

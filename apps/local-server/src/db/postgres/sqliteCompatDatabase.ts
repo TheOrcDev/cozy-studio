@@ -28,8 +28,15 @@ export function translateSqliteSql(sql: string): string | null {
     translated = null;
   } else {
     let out = '';
+    let unquoted = '';
     let placeholder = 0;
     let quote: "'" | '"' | null = null;
+    // Unquoted identifiers fold to lower case in Postgres. Quote camelCase ones, the aliases the
+    // stores read back, everywhere outside literals so `AS presetId` and a later `presetId` agree.
+    const flush = () => {
+      out += unquoted.replace(/(?<![\w$])([a-z]+[A-Z][A-Za-z0-9]*)\b/g, '"$1"');
+      unquoted = '';
+    };
     for (const char of sql) {
       if (quote) {
         out += char;
@@ -37,14 +44,14 @@ export function translateSqliteSql(sql: string): string | null {
         continue;
       }
       if (char === "'" || char === '"') {
+        flush();
         quote = char;
         out += char;
         continue;
       }
-      out += char === '?' ? `$${++placeholder}` : char;
+      unquoted += char === '?' ? `$${++placeholder}` : char;
     }
-    // Unquoted aliases fold to lower case in Postgres; keep camelCase result keys intact.
-    out = out.replace(/\bAS\s+([a-z]+[A-Z][A-Za-z0-9]*)\b/g, 'AS "$1"');
+    flush();
     if (/^\s*INSERT\s+OR\s+IGNORE\s+INTO\b/i.test(out)) {
       out = out.replace(/^(\s*)INSERT\s+OR\s+IGNORE\s+INTO\b/i, '$1INSERT INTO');
       out = /\bRETURNING\b/i.test(out)

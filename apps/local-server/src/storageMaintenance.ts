@@ -152,7 +152,8 @@ export async function findCatalogDuplicates(
   }
   const counts = db
     .query(`SELECT COUNT(*) AS total,
-    COALESCE(SUM(dhash IS NULL), 0) AS pending, COALESCE(SUM(dhash = ''), 0) AS skipped
+    COALESCE(SUM(CASE WHEN dhash IS NULL THEN 1 ELSE 0 END), 0) AS pending,
+    COALESCE(SUM(CASE WHEN dhash = '' THEN 1 ELSE 0 END), 0) AS skipped
     FROM catalog_images WHERE ${liveScope}`)
     .get(workspaceId) as { total: number; pending: number; skipped: number };
   const result: CatalogDuplicateScanResult = {

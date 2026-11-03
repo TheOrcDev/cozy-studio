@@ -10,6 +10,7 @@ import {
   jsonTextArrayElements,
   likeIgnoringCase,
   orderIgnoringCase,
+  orderOutputIgnoringCase,
 } from './db/sqlDialect';
 import { ensureDefaultLibrary, getLibrary } from './libraries';
 import { resolveLibraryPathFromRoot, toPublicAssetUrl } from './library';
@@ -115,7 +116,7 @@ const CATALOG_WORKSPACE_AGGREGATE_COLUMNS = [
 
 let catalogFileExists: (filePath: string) => boolean = existsSync;
 
-/** Hosted mode (ADR 0012) checks object storage instead of the instance's temporary disk. */
+/** Hosted mode (ADR 0013) checks object storage instead of the instance's temporary disk. */
 export function setCatalogFileExistenceCheck(check: ((filePath: string) => boolean) | null) {
   catalogFileExists = check ?? existsSync;
 }
@@ -320,7 +321,7 @@ function pushFilterClauses(
   }
   if (filters.q) {
     const search = parseCatalogSearch(filters.q);
-    if (search.tags.length > MAX_CATALOG_TAGS) clauses.push('0');
+    if (search.tags.length > MAX_CATALOG_TAGS) clauses.push('1 = 0');
     for (const tag of search.tags) {
       clauses.push(
         isPostgresDatabase(database)
@@ -367,20 +368,34 @@ export function listCatalogFacets(workspaceId: string, db?: Database): CatalogFa
   const where = "is_deleted = 0 AND COALESCE(workspace_id, 'default') = ?";
   const providers = database
     .query(
-      `SELECT ${CATALOG_PROVIDER} AS id, COUNT(*) AS count FROM catalog_images WHERE ${where} GROUP BY 1 HAVING ${CATALOG_PROVIDER} IS NOT NULL AND ${CATALOG_PROVIDER} != '' ORDER BY id COLLATE NOCASE`,
+      orderOutputIgnoringCase(
+        database,
+        `SELECT ${CATALOG_PROVIDER} AS id, COUNT(*) AS count FROM catalog_images WHERE ${where} GROUP BY 1 HAVING ${CATALOG_PROVIDER} IS NOT NULL AND ${CATALOG_PROVIDER} != ''`,
+        'id',
+      ),
     )
     .all(workspaceId) as CatalogFacets['providers'];
   const recipes = database
     .query(
-      `SELECT ${DEFAULT_RECIPE} AS id, COUNT(*) AS count FROM catalog_images WHERE ${where} GROUP BY 1 ORDER BY id COLLATE NOCASE`,
+      orderOutputIgnoringCase(
+        database,
+        `SELECT ${DEFAULT_RECIPE} AS id, COUNT(*) AS count FROM catalog_images WHERE ${where} GROUP BY 1`,
+        'id',
+      ),
     )
     .all(workspaceId) as CatalogFacets['recipes'];
   const styles = database
-    .query(`WITH live AS (SELECT id, ${SAFE_GENERATION_CONFIG} AS config FROM catalog_images WHERE ${where}), styles AS (
+    .query(
+      orderOutputIgnoringCase(
+        database,
+        `WITH live AS (SELECT id, ${SAFE_GENERATION_CONFIG} AS config FROM catalog_images WHERE ${where}), styles AS (
     SELECT live.id AS image_id, json_extract(config, '$.recipeParams.presetId') AS presetId, json_extract(config, '$.recipeParams.presetName') AS name FROM live
     UNION ALL
     SELECT live.id AS image_id, json_extract(CASE WHEN style.type = 'object' THEN style.value ELSE '{}' END, '$.presetId'), json_extract(CASE WHEN style.type = 'object' THEN style.value ELSE '{}' END, '$.presetName') FROM live, json_each(live.config, '$.recipeParams.selectedStyles') AS style
-  ) SELECT presetId, COALESCE(MAX(NULLIF(name, '')), presetId) AS name, COUNT(DISTINCT image_id) AS count FROM styles WHERE presetId IS NOT NULL AND presetId != '' GROUP BY presetId ORDER BY name COLLATE NOCASE`)
+  ) SELECT presetId, COALESCE(MAX(NULLIF(name, '')), presetId) AS name, COUNT(DISTINCT image_id) AS count FROM styles WHERE presetId IS NOT NULL AND presetId != '' GROUP BY presetId`,
+        'name',
+      ),
+    )
     .all(workspaceId) as CatalogFacets['styles'];
   return { providers, recipes, styles };
 }

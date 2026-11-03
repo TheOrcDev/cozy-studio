@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { MessageChannel, Worker, receiveMessageOnPort } from 'node:worker_threads';
 
-// Hosted mode keeps the synchronous store API that local SQLite has (ADR 0012). The Postgres
+// Hosted mode keeps the synchronous store API that local SQLite has (ADR 0013). The Postgres
 // driver is asynchronous, so it runs in a worker thread and the caller blocks on Atomics.wait
 // until the reply arrives. One worker owns one connection, which keeps transactions on a single
 // session exactly like the single bun:sqlite handle.

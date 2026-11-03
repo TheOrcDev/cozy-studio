@@ -20,6 +20,7 @@ import { STUDIO_REFERENCE_IMPORT_MAX_PIXELS } from '../../../packages/shared/src
 import { getCatalogImage, listCatalogImageIds, registerCatalogImage } from './catalog';
 import { createCatalogCollection, listCatalogCollections } from './catalogCollections';
 import { getDb } from './db/connection';
+import { equalsIgnoringCase } from './db/sqlDialect';
 import { createWorkspaceInDb, getWorkspaceFromDb } from './db/workspaces';
 import { ensureDefaultLibrary, getLibrary } from './libraries';
 import { resolveLibraryPathFromRoot } from './library';
@@ -386,7 +387,9 @@ export async function importLibraryArchive(
       let importedName = name;
       let collision = 0;
       while (
-        database.query('SELECT 1 FROM workspaces WHERE name = ? COLLATE NOCASE').get(importedName)
+        database
+          .query(`SELECT 1 FROM workspaces WHERE ${equalsIgnoringCase(database, 'name', '?')}`)
+          .get(importedName)
       ) {
         collision += 1;
         const suffix = collision === 1 ? ' (imported)' : ` (imported ${collision})`;

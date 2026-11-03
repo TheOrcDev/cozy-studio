@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite';
 
 import { isPostgresDatabase } from './postgres/sqliteCompatDatabase';
 
-// SQL fragments whose SQLite spelling has no Postgres equivalent (ADR 0012). Everything else is
+// SQL fragments whose SQLite spelling has no Postgres equivalent (ADR 0013). Everything else is
 // shared SQL; sqliteCompatDatabase.ts only rewrites placeholders, aliases and INSERT OR IGNORE.
 
 /** A JSON text column as a set of array elements named `value`, or no rows when it is not an array. */
@@ -36,6 +36,14 @@ export function orderIgnoringCase(db: Database, expression: string, direction: '
   return isPostgresDatabase(db)
     ? `lower(${expression}) ${direction}`
     : `${expression} COLLATE NOCASE ${direction}`;
+}
+
+/** A grouped query ordered by one of its output columns, ignoring case. */
+export function orderOutputIgnoringCase(db: Database, query: string, column: string) {
+  // Postgres resolves names inside an ORDER BY expression against input columns, not output ones.
+  return isPostgresDatabase(db)
+    ? `SELECT * FROM (${query}) AS grouped ORDER BY lower(${column}) ASC`
+    : `${query} ORDER BY ${column} COLLATE NOCASE`;
 }
 
 /** SQLite LIKE ignores ASCII case; Postgres needs ILIKE for the same result. */
