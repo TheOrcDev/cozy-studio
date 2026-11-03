@@ -2,7 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_STUDIO_API_BASE?: string;
-  /** "1" when the UI is built for hosted Cozy Studio (ADR 0012). */
+  /** "1" when the UI is built for hosted Cozy Studio (ADR 0013). */
   readonly VITE_STUDIO_HOSTED?: string;
 }
 

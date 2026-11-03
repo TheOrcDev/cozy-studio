@@ -9,7 +9,7 @@ import {
   type SubscriptionAuthStore,
 } from '../auth/store';
 
-// Hosted provider sign-in tokens (ADR 0012). Postgres only ever holds AES-256-GCM ciphertext; the
+// Hosted provider sign-in tokens (ADR 0013). Postgres only ever holds AES-256-GCM ciphertext; the
 // key lives in the function's environment, never in the database, settings or logs.
 
 const PROVIDERS: SubscriptionProviderId[] = ['codex', 'xai', 'google'];

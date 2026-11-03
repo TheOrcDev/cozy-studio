@@ -29,7 +29,7 @@ interface LibraryRoutesDependencies {
   logger?: typeof log;
 }
 
-// Bun streams with Bun.file; hosted mode runs on Node (ADR 0012).
+// Bun streams with Bun.file; hosted mode runs on Node (ADR 0013).
 function createPortableFileResponse(filePath: string) {
   if (typeof Bun !== 'undefined') return new Response(Bun.file(filePath));
   return new Response(Readable.toWeb(createReadStream(filePath)) as ReadableStream);

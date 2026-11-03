@@ -11,7 +11,7 @@ const runtimeRequire = createRequire(import.meta.url);
 export function getDb(db?: Database) {
   if (db) return db;
   if (!defaultDb) {
-    // Hosted mode (ADR 0012) keeps the same synchronous store API on Postgres.
+    // Hosted mode (ADR 0013) keeps the same synchronous store API on Postgres.
     const postgresUrl = process.env.STUDIO_DATABASE_URL;
     if (postgresUrl) {
       defaultDb = createSqliteCompatPostgresDatabase(

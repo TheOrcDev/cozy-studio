@@ -34,7 +34,7 @@ export interface HostedSecurityOptions {
 
 type Caller = 'internal' | 'owner' | 'agent' | 'signed-url' | null;
 
-// Routes that host-local Studio offers but a hosted instance must not (ADR 0012).
+// Routes that host-local Studio offers but a hosted instance must not (ADR 0013).
 const HOST_LOCAL_PREFIXES = [
   '/api/updates',
   '/api/onboarding',
@@ -52,6 +52,10 @@ const HOST_LOCAL_PREFIXES = [
 
 export function isHostLocalRoute(method: string, path: string) {
   if (HOST_LOCAL_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) {
+    return true;
+  }
+  // A Library Archive holds up to 1 GiB of images; an instance keeps a few hundred MiB on disk.
+  if (path === '/api/workspaces/import' || /^\/api\/workspaces\/[^/]+\/export$/.test(path)) {
     return true;
   }
   // Registering arbitrary host folders makes no sense on a disposable instance.

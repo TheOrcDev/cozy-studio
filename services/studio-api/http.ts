@@ -60,7 +60,7 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    // A hosted session that expired goes back to the sign-in screen (ADR 0012).
+    // A hosted session that expired goes back to the sign-in screen (ADR 0013).
     if (response.status === 401 && import.meta.env.VITE_STUDIO_HOSTED === '1') {
       window.location.reload();
     }

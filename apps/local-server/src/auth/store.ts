@@ -343,7 +343,7 @@ export function getSubscriptionAuthStore() {
   return defaultStore;
 }
 
-/** Hosted mode (ADR 0012) keeps sealed provider tokens in Postgres instead of the app-data file. */
+/** Hosted mode (ADR 0013) keeps sealed provider tokens in Postgres instead of the app-data file. */
 export function setSubscriptionAuthStore(store: SubscriptionAuthStore | null) {
   defaultStore = store;
 }

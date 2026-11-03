@@ -19,7 +19,7 @@ export function initStudio() {
   const envPath = path.resolve(process.cwd(), '.env.local');
   const codexVersion = null;
 
-  // Hosted instances are configured through the function environment (ADR 0012).
+  // Hosted instances are configured through the function environment (ADR 0013).
   if (!isHostedMode() && !existsSync(envPath)) {
     const settings = getSettings();
     writeFileSync(

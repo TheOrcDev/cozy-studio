@@ -6,7 +6,7 @@ type Listener = (event: PublishedStudioEvent) => void;
 const listeners = new Set<Listener>();
 let currentRevision = 0;
 
-/** Durable revision source; hosted mode (ADR 0012) shares one revision order across instances. */
+/** Durable revision source; hosted mode (ADR 0013) shares one revision order across instances. */
 export interface StudioEventSink {
   append(event: { type: string; payload: unknown; createdAt: string }): number;
   currentRevision(): number;

@@ -11,6 +11,7 @@ The `cozy-studio-mcp` tools operate the user's running Cozy Studio. Each tool's 
 
 1. Check state.
    - If the client lists no `studio_*` tools, register the server as `docs/agents/mcp.md` in the Studio checkout shows.
+   - If the server instructions start with `Hosted Cozy Studio`, read [hosted](references/hosted.md) first.
    - Call `studio_status`. If the reply says Studio is not running, or is a 403 with `access: "off"`, read [setup-and-repair](references/setup-and-repair.md).
    - Note `mcpAccessLabel` (Read only, Organize or Full control), `notice` and `organizeNotice`.
    - Done when `studio_status` answers and you know the access level.
@@ -20,6 +21,7 @@ The `cozy-studio-mcp` tools operate the user's running Cozy Studio. Each tool's 
    | Request                                                                                   | Reference                                                        |
    | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
    | Studio offline, Agent access Off, check or apply an app update, "Unknown Studio MCP tool" | [setup-and-repair](references/setup-and-repair.md)               |
+   | Hosted Cozy Studio: agent token, signed image links, unavailable tools                    | [hosted](references/hosted.md)                                   |
    | Settings, Agent access, provider or model choice                                          | [configure](references/configure.md)                             |
    | Choose, create, rename or delete a workspace                                              | [workspaces](references/workspaces.md)                           |
    | Tag, sort, file or clean up Library images                                                | [organize-library](references/organize-library.md)               |

@@ -21,7 +21,7 @@ function getBunImage() {
   return typeof Image === 'function' ? Image : null;
 }
 
-// Hosted mode runs on Node (ADR 0012), where Bun.Image does not exist; sharp produces the same
+// Hosted mode runs on Node (ADR 0013), where Bun.Image does not exist; sharp produces the same
 // inside-fit WebP there. It is loaded lazily so the Bun hot path never imports it.
 async function loadSharp() {
   try {

@@ -49,6 +49,9 @@ describe('hosted security middleware', () => {
     expect((await call('/api/updates', { headers: { cookie: ownerCookie } })).status).toBe(404);
     expect(isHostLocalRoute('POST', '/api/libraries')).toBe(true);
     expect(isHostLocalRoute('GET', '/api/libraries')).toBe(false);
+    expect(isHostLocalRoute('GET', '/api/workspaces/w1/export')).toBe(true);
+    expect(isHostLocalRoute('POST', '/api/workspaces/import')).toBe(true);
+    expect(isHostLocalRoute('GET', '/api/workspaces/w1')).toBe(false);
     expect((await call('/api/jobs')).status).toBe(401);
     expect((await call('/api/session')).status).toBe(200);
     expect((await call('/neon-auth/ok')).status).toBe(200);

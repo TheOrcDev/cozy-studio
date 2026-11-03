@@ -1,6 +1,6 @@
 # Hosted Cozy Studio
 
-Run your Studio as a Neon Function with the UI on Vercel, use it from any browser, and let your agents generate through MCP. Local mode is unaffected. The design is in [ADR 0012](adr/0012-hosted-studio-on-neon-and-vercel.md).
+Run your Studio as a Neon Function with the UI on Vercel, use it from any browser, and let your agents generate through MCP. Local mode is unaffected. The design is in [ADR 0013](adr/0013-hosted-studio-on-neon-and-vercel.md).
 
 Hosted Studio is for one owner. ChatGPT is the hosted provider.
 
@@ -67,14 +67,14 @@ The token is shown once. `hosted:admin token list` and `hosted:admin token revok
 
 Open your Vercel URL, enter `STUDIO_OWNER_EMAIL` and the code Neon Auth emails you. Other accounts can sign in to Neon Auth but get no access to Studio.
 
-To let agents generate, set **Agent access (MCP)** to **Generate and cancel** in Settings. Then connect an agent:
+Set **Agent access (MCP)** in Settings > Advanced & maintenance: **Organize** lets agents tag and file images, **Full control** also lets them generate. Then connect an agent:
 
 ```bash
 claude mcp add --transport http cozy-studio https://<your-project>.vercel.app/mcp \
   --header "Authorization: Bearer <agent token>"
 ```
 
-Agents use the same tools as local MCP, except reading local files. Image URLs in results are signed links valid for 24 hours, so an agent can download them without the token.
+Agents use the same tools as local MCP, except local file imports, first-run onboarding and app updates. Image rows carry signed `thumbnailUrl` and `publicUrl` links valid for 24 hours, so an agent can download them without the token. `studio_guide` serves the agent guide, and its `hosted` topic lists these differences.
 
 ## Style packs from another source
 
@@ -88,11 +88,12 @@ COZY_STYLES_GITHUB_TOKEN=<the source's token or password>
 
 These settings replace the public source. Packs already installed stay installed when you change or remove them, but Studio can only update a pack from the source it is set to.
 
-Each instance keeps only pack manifests on its disk. The other pack files download the first time they are read, and their images count toward the same local budget as Library images.
+Each instance keeps only pack manifests on its disk. The other pack files download the first time they are read, and their images count toward the same local budget as other images.
 
 ## Limits
 
-- Routes that act on the host (updates, onboarding, Codex app-server, output sources, library folders, maintenance, local style installs, reset) and the sprite atlas and animation workflows are not available.
+- Routes that act on the host (updates, onboarding, Codex app-server, output sources, Output Folders, maintenance and duplicate review, local style installs, reset) and the sprite atlas and animation workflows are not available.
+- Library archive export and import are not available: an archive can hold more images than an instance keeps on disk.
 - The first time an instance reads an image, it downloads it from object storage.
 - A style pack installed or removed on one instance reaches the others the next time they list style packs. Reload Studio to see it.
 - If an instance stops mid-job, the sweeper (every 15 minutes) adopts the job. A ChatGPT job that had already been submitted moves to review instead of being sent twice.

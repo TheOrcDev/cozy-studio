@@ -8,7 +8,7 @@ import {
 } from '../apps/local-server/src/hosted/hostedAuth';
 import { createSealedSubscriptionAuthStore } from '../apps/local-server/src/hosted/sealedCredentialStore';
 
-// Owner tasks for hosted Cozy Studio (ADR 0012, docs/HOSTING.md). Needs STUDIO_DATABASE_URL, and
+// Owner tasks for hosted Cozy Studio (ADR 0013, docs/HOSTING.md). Needs STUDIO_DATABASE_URL, and
 // STUDIO_SECRET_KEY for credential import, e.g.
 //   STUDIO_DATABASE_URL="$(neon cs --pooled false)" bun --env-file=.env.hosted run hosted:admin token create laptop
 

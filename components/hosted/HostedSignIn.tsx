@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import ReactDOM from 'react-dom/client';
 
-// Hosted Cozy Studio sign-in (ADR 0012). Neon Auth sends a one-time code by email; its JWT is then
+// Hosted Cozy Studio sign-in (ADR 0013). Neon Auth sends a one-time code by email; its JWT is then
 // exchanged for the Studio session cookie. Neon Auth is reached through the /neon-auth rewrite so
 // its cookies stay first-party. Loaded only in hosted builds.
 

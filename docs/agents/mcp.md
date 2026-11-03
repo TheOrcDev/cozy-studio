@@ -36,6 +36,10 @@ The bridge waits 30 seconds for a call, and 120 seconds for `studio_install_exte
 
 Use an absolute `bun` executable when the client does not search `PATH`. Set `COZY_STUDIO_API_URL` when the API port is not 17223. The URL must be a loopback HTTP origin. The bridge opens no listening port. `bun run mcp` starts the same script from a shell.
 
+### Hosted Studio
+
+[Hosted Cozy Studio](../HOSTING.md) serves the same tools as Streamable HTTP MCP at `<origin>/mcp`. Each request carries `Authorization: Bearer <agent token>`. It omits `studio_import_reference_file`, `studio_onboarding`, `studio_updates` and `studio_apply_update`. It answers `studio_guide` from the same skill files, with the topic `hosted`. Image rows carry signed `thumbnailUrl` and `publicUrl` links, valid for 24 hours, instead of file paths.
+
 ## Access
 
 Settings > Advanced & maintenance > **Agent access (MCP)** controls every call, including calls from already connected clients. Studio reads the setting again on each call. Each level includes the one before it.

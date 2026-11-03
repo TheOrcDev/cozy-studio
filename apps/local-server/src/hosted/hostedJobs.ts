@@ -4,7 +4,7 @@ import type { Database } from 'bun:sqlite';
 import type { Job } from '../../../../packages/shared/src';
 import type { WorkerController } from '../worker';
 
-// Hosted job execution (ADR 0012). Persistent Jobs stay the queue truth (ADR 0005). An instance
+// Hosted job execution (ADR 0013). Persistent Jobs stay the queue truth (ADR 0005). An instance
 // leases a job when it enqueues it, renews the lease while the job is queued or running here, and
 // keeps itself alive with waitUntil until its queue drains. The every-minute sweeper picks up jobs
 // whose lease lapsed, for example because their instance was evicted.

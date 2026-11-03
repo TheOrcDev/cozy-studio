@@ -19,7 +19,7 @@ function LocalizedApp() {
 }
 
 async function start(root: HTMLElement) {
-  // Hosted Cozy Studio (ADR 0012) asks the owner to sign in before anything reaches the API.
+  // Hosted Cozy Studio (ADR 0013) asks the owner to sign in before anything reaches the API.
   if (import.meta.env.VITE_STUDIO_HOSTED === '1') {
     const { ensureHostedSession } = await import('./components/hosted/HostedSignIn');
     await ensureHostedSession(root);

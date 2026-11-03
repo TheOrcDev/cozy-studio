@@ -184,7 +184,7 @@ const defaultJobStore: StudioJobStore = {
 const defaultAssetStore: StudioAssetStore = { listAssets };
 const defaultLogStore: StudioLogStore = { listLogs };
 
-/** Hosted mode (ADR 0012) replaces loopback trust with owner auth and shares state through Neon. */
+/** Hosted mode (ADR 0013) replaces loopback trust with owner auth and shares state through Neon. */
 export interface HostedStudioIntegration {
   security: MiddlewareHandler;
   /** Registers hosted routes and returns the worker the app should use. */

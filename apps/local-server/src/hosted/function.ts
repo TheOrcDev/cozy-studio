@@ -1,7 +1,7 @@
 import type { StudioAppInstance } from '../appFactory';
 import { createHostedStudio } from './hostedStudio';
 
-// Neon Function entry for hosted Cozy Studio (ADR 0012). The app is built once per instance; a
+// Neon Function entry for hosted Cozy Studio (ADR 0013). The app is built once per instance; a
 // failed start is retried on the next request instead of leaving the instance broken.
 let studio: Promise<StudioAppInstance> | null = null;
 

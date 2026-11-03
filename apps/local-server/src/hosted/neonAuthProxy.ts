@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 
 // Neon Auth rejects requests that carry a forwarded host, which Vercel rewrites add. The browser
 // therefore reaches Neon Auth through this function: same origin as the UI, so its session cookie
-// stays first-party, and a clean upstream request (ADR 0012).
+// stays first-party, and a clean upstream request (ADR 0013).
 
 const FORWARDED_REQUEST_HEADERS = [
   'accept',

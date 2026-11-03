@@ -19,10 +19,11 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 
-// Hosted Library storage (ADR 0012). Every instance keeps the Library at the same absolute path
-// under HOSTED_ROOT, so paths stored in Postgres stay valid everywhere. Files are downloaded from
-// object storage when first read and uploaded after they change. Only files this instance has seen
-// can be deleted remotely: a file missing locally is merely not downloaded yet.
+// Hosted Storage Mirror (ADR 0013). Every instance keeps the Studio Data Folder and Output Folder
+// at the same absolute paths under HOSTED_ROOT, so paths stored in Postgres stay valid everywhere.
+// Files are downloaded from object storage when first read and uploaded after they change. Only
+// files this instance has seen can be deleted remotely: a file missing locally is merely not
+// downloaded yet.
 // An instance's disk is small and fixed, while the bucket is not, so once local images pass a budget
 // the least recently used ones that are already uploaded are dropped and downloaded again on demand.
 

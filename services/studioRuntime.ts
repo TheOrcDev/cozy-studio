@@ -34,7 +34,7 @@ export interface StudioRuntimeSources {
   envApiBase?: string;
   pageOrigin?: string;
   productionUi?: boolean;
-  /** Hosted Cozy Studio: the UI and API share the page origin through rewrites (ADR 0012). */
+  /** Hosted Cozy Studio: the UI and API share the page origin through rewrites (ADR 0013). */
   hosted?: boolean;
   fallbackApiBase?: string;
 }

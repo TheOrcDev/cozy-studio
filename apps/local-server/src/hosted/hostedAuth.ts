@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { Database } from 'bun:sqlite';
 
-// Hosted access control (ADR 0012). The owner signs in once through Neon Auth and receives an
+// Hosted access control (ADR 0013). The owner signs in once through Neon Auth and receives an
 // HttpOnly session cookie, which also covers EventSource and <img> requests. Agents use bearer
 // tokens that the owner creates and revokes; only their SHA-256 hash is stored.
 
@@ -46,7 +46,7 @@ export function verifyOwnerSession(
   }
 }
 
-/** Short-lived signature for a Library URL, so agents can download results without a header. */
+/** Short-lived signature for a `/library/` URL, so agents can download results without a header. */
 export function signLibraryPath(secret: string, libraryPath: string, expiresAt: number) {
   return hmac(secret, `library:${libraryPath}:${expiresAt}`);
 }

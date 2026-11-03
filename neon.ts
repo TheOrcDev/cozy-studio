@@ -1,6 +1,6 @@
 import { defineConfig } from '@neon/config/v1';
 
-// Hosted Cozy Studio on Neon (ADR 0012, docs/HOSTING.md). Deploy with:
+// Hosted Cozy Studio on Neon (ADR 0013, docs/HOSTING.md). Deploy with:
 //   neon deploy --env .env.hosted
 // .env.hosted holds the secrets below and is never committed.
 const required = (name: string) => {

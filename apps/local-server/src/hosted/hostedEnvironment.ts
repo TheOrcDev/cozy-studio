@@ -1,5 +1,5 @@
-// Hosted mode (ADR 0012): Cozy Studio runs as a Neon Function behind a Vercel UI. Each instance
-// keeps a disposable Library under HOSTED_ROOT that mirrors object storage, and every absolute
+// Hosted mode (ADR 0013): Cozy Studio runs as a Neon Function behind a Vercel UI. Each instance
+// keeps disposable storage folders under HOSTED_ROOT that mirror object storage, and every absolute
 // path stored in Postgres resolves to the same place in every instance.
 export const HOSTED_ROOT = '/tmp/cozy';
 

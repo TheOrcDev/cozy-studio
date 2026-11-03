@@ -8,7 +8,7 @@ import type { Job } from '../../../../packages/shared/src';
 import { EXTENSION_MANIFEST_FILE } from '../../../../packages/shared/src/extensions';
 import { createStudioApp, type StudioAppInstance } from '../appFactory';
 import { setSubscriptionAuthStore } from '../auth/store';
-import { setCatalogFileExistenceCheck } from '../catalog';
+import { getCatalogImage, setCatalogFileExistenceCheck } from '../catalog';
 import { getSettings } from '../config';
 import { getDb } from '../db/connection';
 import { listRecoverableJobs } from '../db/jobs';
@@ -21,6 +21,7 @@ import { buildLibraryAssetHeaders, resolveThumbnailMaxEdge } from '../libraryAss
 import { log } from '../logger';
 import { applyHostedEnvironment, HOSTED_ROOT, requireHostedSetting } from './hostedEnvironment';
 import { createHostedEventFeed, createHostedEventSink, pruneHostedEvents } from './hostedEvents';
+import { HOSTED_GUIDE } from './hostedGuide';
 import { createHostedJobRuntime } from './hostedJobs';
 import { createHostedMcpRoutes } from './hostedMcp';
 import { createHostedSecurityMiddleware, createOwnerSessionRoutes } from './hostedSecurity';
@@ -83,7 +84,7 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
 
   const mirror = createLibraryMirror({ root: HOSTED_ROOT, bucket });
   setCatalogFileExistenceCheck((filePath) => mirror.knownToExist(filePath));
-  const syncLibrary = () => background(mirror.sync(), 'Library upload');
+  const syncLibrary = () => background(mirror.sync(), 'Storage upload');
   // Extension listings scan manifests on disk. Every other style pack file downloads when first
   // read, and a sync afterwards keeps downloaded images within the local budget.
   await mirror.hydrateFolders(EXTENSIONS_PREFIX, EXTENSION_MANIFEST_FILE);
@@ -163,6 +164,13 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
       });
     });
 
+    // A conversion reads the full-size source, which this instance may not have downloaded.
+    app.post('/api/catalog/:id/convert', async (c, next) => {
+      const image = getCatalogImage(c.req.param('id'));
+      if (image) await mirror.hydrate(image.filePath);
+      await next();
+    });
+
     app.get('/api/extensions', async (_c, next) => {
       await refreshExtensions();
       await next();
@@ -213,6 +221,7 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
         request: (requestPath, init) => app.request(requestPath, init),
         publicOrigin,
         sessionSecret,
+        guide: HOSTED_GUIDE,
       }),
     );
 

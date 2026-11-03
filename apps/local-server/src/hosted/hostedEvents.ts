@@ -3,7 +3,7 @@ import type { Database } from 'bun:sqlite';
 import type { StudioEvent, UnknownStudioEvent } from '../../../../packages/shared/src';
 import type { StudioEventSink } from '../events';
 
-// Hosted instances share one event order (ADR 0012). publishEvent appends to studio_events, and
+// Hosted instances share one event order (ADR 0013). publishEvent appends to studio_events, and
 // each instance with an open /api/events stream polls that table, so a job finishing in one
 // instance reaches a browser connected to another. Revisions become durable and global, which
 // keeps ADR 0004's reconnect rules: a stale `since` still reports reconciled: false.
