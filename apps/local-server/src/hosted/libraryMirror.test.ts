@@ -10,6 +10,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -64,6 +65,14 @@ function fakeBucket() {
       if (command instanceof DeleteObjectCommand) {
         objects.delete(command.input.Key!);
         return {};
+      }
+      if (command instanceof CopyObjectCommand) {
+        const source = decodeURIComponent(command.input.CopySource!.split('/').slice(1).join('/'));
+        const object = objects.get(source);
+        if (!object) throw Object.assign(new Error('missing'), { name: 'NoSuchKey' });
+        const etag = `"${(version += 1)}"`;
+        objects.set(command.input.Key!, { body: object.body, etag });
+        return { CopyObjectResult: { ETag: etag } };
       }
       throw new Error('Unexpected command');
     },
@@ -138,6 +147,31 @@ describe('hosted Library mirror', () => {
     expect(await refresh()).toBe(2);
     expect(existsSync(pack)).toBe(false);
     expect(existsSync(path.join(rootB, 'Extensions', 'cozy.pack-2', 'extension.json'))).toBe(true);
+  });
+
+  it('moves and deletes remote copies of images this instance never downloaded', async () => {
+    const { objects, client } = fakeBucket();
+    const encoder = new TextEncoder();
+    objects.set('Library/assets/cat 1.png', { body: encoder.encode('cat'), etag: '"a"' });
+    objects.set('Library/assets/dog.png', { body: encoder.encode('dog'), etag: '"b"' });
+    const root = instanceRoot();
+    const mirror = createLibraryMirror({ root, bucket: 'test', client });
+    const at = (key: string) => path.join(root, ...key.split('/'));
+
+    // Archived and restored before one sync: both moves apply, in order.
+    mirror.moveRemote(at('Library/assets/cat 1.png'), at('Library/.trash/assets/x-cat 1.png'));
+    mirror.moveRemote(at('Library/.trash/assets/x-cat 1.png'), at('Library/assets/cat 1-2.png'));
+    mirror.removeRemote(at('Library/assets/dog.png'));
+    expect(mirror.knownToExist(at('Library/assets/cat 1-2.png'))).toBe(true);
+
+    // A read of the new path waits for the move instead of missing the file.
+    expect(await mirror.hydrate(at('Library/assets/cat 1-2.png'))).toBe(true);
+    expect(readFileSync(at('Library/assets/cat 1-2.png'), 'utf8')).toBe('cat');
+    expect([...objects.keys()]).toEqual(['Library/assets/cat 1-2.png']);
+
+    // A source that is already gone is skipped.
+    mirror.moveRemote(at('Library/assets/gone.png'), at('Library/.trash/assets/gone.png'));
+    await expect(mirror.sync()).resolves.toEqual({ uploaded: 0, deleted: 0 });
   });
 
   it('drops uploaded images past the local budget but keeps them in object storage', async () => {

@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -62,6 +63,12 @@ export interface LibraryMirror {
   head(filePath: string): Promise<MirroredFile | null>;
   /** Whether the file exists locally or was seen remotely. */
   knownToExist(filePath: string): boolean;
+  /**
+   * Moves or deletes the remote copy of a file this instance does not hold, on the next sync.
+   * Catalog archive, restore and purge call these, which cannot wait for object storage.
+   */
+  moveRemote(from: string, to: string): void;
+  removeRemote(filePath: string): void;
   /** Uploads new or changed files and deletes remote copies of files removed here. */
   sync(): Promise<{ uploaded: number; deleted: number }>;
 }
@@ -88,6 +95,8 @@ export function createLibraryMirror({
   };
   let syncing: Promise<{ uploaded: number; deleted: number }> | null = null;
   let syncAgain = false;
+  // Remote moves and deletes in the order the catalog asked for them; a null target deletes.
+  const pendingRemote: { from: string; to: string | null }[] = [];
 
   const keyFor = (filePath: string) => {
     const relative = path.relative(root, path.resolve(filePath));
@@ -167,6 +176,8 @@ export function createLibraryMirror({
     if (existsSync(filePath)) return true;
     const key = keyFor(filePath);
     if (!key || !isMirrored(filePath)) return false;
+    // A file the catalog just moved here is still at its old key until the next sync.
+    if (pendingRemote.some((operation) => operation.to === key)) await sync();
     const missingSince = missingRemote.get(key);
     if (missingSince && Date.now() - missingSince < 5_000) return false;
     return download(key, filePath);
@@ -279,7 +290,39 @@ export function createLibraryMirror({
     }
   };
 
+  // Sequential, so a file archived and restored before one sync moves twice in order.
+  const applyPendingRemote = async () => {
+    let deleted = 0;
+    while (pendingRemote.length > 0) {
+      const { from, to } = pendingRemote.shift()!;
+      try {
+        if (to) {
+          // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Moves apply in request order.
+          const copy = await client.send(
+            new CopyObjectCommand({
+              Bucket: bucket,
+              Key: to,
+              CopySource: `${bucket}/${from.split('/').map(encodeURIComponent).join('/')}`,
+              MetadataDirective: 'COPY',
+            }),
+          );
+          rememberEtag(to, copy.CopyObjectResult?.ETag);
+        }
+        // react-doctor-disable-next-line react-doctor/async-await-in-loop -- Delete only after the copy.
+        await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: from }));
+        if (!to) deleted += 1;
+      } catch (error) {
+        // A source that is already gone has nothing to move; the catalog row is the truth.
+        if (!isMissing(error)) throw error;
+      }
+      remoteEtags.delete(from);
+      knownRemote.delete(from);
+    }
+    return deleted;
+  };
+
   const syncOnce = async () => {
+    const remoteDeleted = await applyPendingRemote();
     const files: string[] = [];
     walk(root, files);
     const present = new Set(files);
@@ -318,7 +361,41 @@ export function createLibraryMirror({
       deleted += 1;
     }
     evictBeyondBudget(files.filter((filePath) => existsSync(filePath)));
-    return { uploaded: changed.length, deleted };
+    return { uploaded: changed.length, deleted: deleted + remoteDeleted };
+  };
+
+  const sync = () => {
+    if (syncing) {
+      syncAgain = true;
+      return syncing;
+    }
+    syncing = (async () => {
+      let total = { uploaded: 0, deleted: 0 };
+      do {
+        syncAgain = false;
+        const result = await syncOnce();
+        total = {
+          uploaded: total.uploaded + result.uploaded,
+          deleted: total.deleted + result.deleted,
+        };
+      } while (syncAgain);
+      return total;
+    })().finally(() => {
+      syncing = null;
+    });
+    return syncing;
+  };
+
+  const queueRemote = (from: string, to: string | null) => {
+    const fromKey = keyFor(from);
+    const toKey = to === null ? null : keyFor(to);
+    if (!fromKey || (to !== null && !toKey)) return;
+    pendingRemote.push({ from: fromKey, to: toKey });
+    missingRemote.delete(fromKey);
+    if (toKey) {
+      knownRemote.add(toKey);
+      missingRemote.delete(toKey);
+    }
   };
 
   return {
@@ -399,27 +476,9 @@ export function createLibraryMirror({
       const key = keyFor(filePath);
       return key ? knownRemote.has(key) || !missingRemote.has(key) : false;
     },
-    sync() {
-      if (syncing) {
-        syncAgain = true;
-        return syncing;
-      }
-      syncing = (async () => {
-        let total = { uploaded: 0, deleted: 0 };
-        do {
-          syncAgain = false;
-          const result = await syncOnce();
-          total = {
-            uploaded: total.uploaded + result.uploaded,
-            deleted: total.deleted + result.deleted,
-          };
-        } while (syncAgain);
-        return total;
-      })().finally(() => {
-        syncing = null;
-      });
-      return syncing;
-    },
+    moveRemote: (from, to) => queueRemote(from, to),
+    removeRemote: (filePath) => queueRemote(filePath, null),
+    sync,
   };
 }
 

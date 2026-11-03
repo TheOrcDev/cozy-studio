@@ -2,13 +2,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { Database } from 'bun:sqlite';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   listCatalogFacets,
+  purgeCatalogImage,
   queryCatalog,
   queryCatalogWorkspaceSummaries,
   registerCatalogImage,
+  restoreCatalogImage,
+  setCatalogRemoteFiles,
+  softDeleteCatalogImage,
   updateCatalogImage,
 } from '../../catalog';
 import {
@@ -266,6 +270,36 @@ describe('stores on Postgres', () => {
       return { failed: [] };
     });
     expect(deleted.ok).toBe(true);
+  });
+
+  it('archives, restores and purges images whose files are only in object storage', () => {
+    const library = ensureDefaultLibrary();
+    const remote = { move: vi.fn(), remove: vi.fn() };
+    setCatalogRemoteFiles(remote);
+    try {
+      const filePath = path.join(library.path, 'assets', 'remote-only.png');
+      const image = registerCatalogImage({
+        libraryId: library.id,
+        filePath,
+        prompt: 'remote only',
+        mimeType: 'image/png',
+        workspaceId: 'default',
+      } as never);
+
+      const archived = softDeleteCatalogImage(image.id)!;
+      expect(archived.isDeleted).toBe(true);
+      expect(remote.move).toHaveBeenLastCalledWith(filePath, archived.filePath);
+
+      const restored = restoreCatalogImage(image.id)!;
+      expect(restored.isDeleted).toBe(false);
+      expect(remote.move).toHaveBeenLastCalledWith(archived.filePath, restored.filePath);
+
+      const purged = softDeleteCatalogImage(image.id)!;
+      expect(purgeCatalogImage(image.id)?.id).toBe(image.id);
+      expect(remote.remove).toHaveBeenCalledWith(purged.filePath);
+    } finally {
+      setCatalogRemoteFiles(null);
+    }
   });
 
   it('lists user styles', () => {

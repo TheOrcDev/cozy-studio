@@ -8,7 +8,7 @@ import type { Job } from '../../../../packages/shared/src';
 import { EXTENSION_MANIFEST_FILE } from '../../../../packages/shared/src/extensions';
 import { createStudioApp, type StudioAppInstance } from '../appFactory';
 import { setSubscriptionAuthStore } from '../auth/store';
-import { getCatalogImage, setCatalogFileExistenceCheck } from '../catalog';
+import { getCatalogImage, setCatalogFileExistenceCheck, setCatalogRemoteFiles } from '../catalog';
 import { getSettings } from '../config';
 import { getDb } from '../db/connection';
 import { listRecoverableJobs } from '../db/jobs';
@@ -84,6 +84,10 @@ export async function createHostedStudio(): Promise<StudioAppInstance> {
 
   const mirror = createLibraryMirror({ root: HOSTED_ROOT, bucket });
   setCatalogFileExistenceCheck((filePath) => mirror.knownToExist(filePath));
+  setCatalogRemoteFiles({
+    move: (from, to) => mirror.moveRemote(from, to),
+    remove: (filePath) => mirror.removeRemote(filePath),
+  });
   const syncLibrary = () => background(mirror.sync(), 'Storage upload');
   // Extension listings scan manifests on disk. Every other style pack file downloads when first
   // read, and a sync afterwards keeps downloaded images within the local budget.

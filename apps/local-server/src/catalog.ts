@@ -121,6 +121,16 @@ export function setCatalogFileExistenceCheck(check: ((filePath: string) => boole
   catalogFileExists = check ?? existsSync;
 }
 
+let catalogRemoteFiles: {
+  move(from: string, to: string): void;
+  remove(filePath: string): void;
+} | null = null;
+
+/** Hosted mode (ADR 0013) moves and deletes files this instance has not downloaded in storage. */
+export function setCatalogRemoteFiles(remote: typeof catalogRemoteFiles) {
+  catalogRemoteFiles = remote;
+}
+
 function mapCatalogImage(
   row: any,
   options: { includeGenerationConfig?: boolean; summary?: boolean } = {},
@@ -695,7 +705,7 @@ export function softDeleteCatalogImage(id: string) {
   if (existsSync(image.filePath)) {
     copyFileSync(image.filePath, trashedPath, constants.COPYFILE_EXCL);
     unlinkSync(image.filePath);
-  }
+  } else catalogRemoteFiles?.move(image.filePath, trashedPath);
   getDb()
     .query(
       'UPDATE catalog_images SET is_deleted = 1, deleted_at = ?, file_path = ?, public_url = ? WHERE id = ?',
@@ -725,7 +735,7 @@ export function restoreCatalogImage(id: string) {
   if (existsSync(image.filePath)) {
     copyFileSync(image.filePath, restoredPath, constants.COPYFILE_EXCL);
     unlinkSync(image.filePath);
-  }
+  } else catalogRemoteFiles?.move(image.filePath, restoredPath);
   getDb()
     .query(
       'UPDATE catalog_images SET is_deleted = 0, deleted_at = NULL, file_path = ?, public_url = ? WHERE id = ?',
@@ -748,7 +758,7 @@ export function purgeCatalogImage(id: string) {
   for (const filePath of [image.filePath, image.thumbnailPath]) {
     if (filePath && existsSync(filePath)) {
       rmSync(filePath, { force: true });
-    }
+    } else if (filePath) catalogRemoteFiles?.remove(filePath);
   }
 
   getDb().query('DELETE FROM catalog_images WHERE id = ?').run(id);
