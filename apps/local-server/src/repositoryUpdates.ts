@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -125,8 +126,11 @@ export function createRepositoryUpdates({
       ['rev-parse', '--show-toplevel'],
       'Updates require a Git checkout with an origin remote.',
     );
-    if (resolve(top) !== resolve(root))
-      throw new Error('Updates require the Studio repository root.');
+    // Git prints the real path; the root can pass through a symlink (macOS /var is /private/var).
+    const [realTop, realRoot] = await Promise.all(
+      [top, root].map((item) => realpath(resolve(item)).catch(() => resolve(item))),
+    );
+    if (realTop !== realRoot) throw new Error('Updates require the Studio repository root.');
     state.currentCommit = await git(['rev-parse', 'HEAD'], 'Cannot read the installed commit.');
     state.currentVersion = await readCommitVersion(state.currentCommit);
     state.latestCommit = null;

@@ -187,11 +187,17 @@ export function createImageConversion({
         `conversion:${randomUUID()}`,
       );
       await copyFile(temporaryPath, destinationPath, constants.COPYFILE_EXCL);
+      // Containment is checked on real paths, but Library URLs are relative to the registered
+      // spelling, which can pass through a symlink (macOS /var is /private/var).
+      const catalogPath = path.join(
+        outputLibrary.path,
+        path.relative(registeredRoot, destinationPath),
+      );
       let image: CatalogImage;
       try {
         image = catalogStore.registerCatalogImage({
           libraryId: output.libraryId,
-          filePath: destinationPath,
+          filePath: catalogPath,
           mimeType,
           fileSizeBytes: bytes.length,
           width: encoded.width,
